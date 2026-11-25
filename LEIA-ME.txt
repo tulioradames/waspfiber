@@ -1,0 +1,351 @@
+WASPFIBER - diagramas de fusao e fibra optica (FTTX)         versao B0.32
+=========================================================================
+
+COMO ABRIR
+----------
+Clique duas vezes em WaspFiber.exe. E isso - nao precisa instalar nada.
+Na primeira vez o Windows pode avisar "O Windows protegeu o computador":
+clique em "Mais informacoes" > "Executar assim mesmo".
+
+
+O QUE MUDOU NA B0.32 (dialogos no tema)
+---------------------------------------
+- As janelas de cadastro (novo equipamento, editar, porta, rotulo...)
+  estavam com cores misturadas no Windows: rotulos em caixa preta, faixa
+  clara e botoes brancos. Agora fundo, campos e botoes seguem o tema
+  escuro, com o OK em destaque e "Cancelar" em portugues.
+- Barra de titulo escura tambem nos dialogos e na janela principal
+  (Windows 10/11).
+
+
+O QUE MUDOU NA B0.31 (tipos de porta e fusao em lote)
+-----------------------------------------------------
+- TIPO DE CONECTOR EM CADA PORTA: SC ou LC, e polimento APC ou UPC.
+  No desenho a cor segue o padrao de mercado: APC verde, UPC azul (a
+  borda do adaptador e o conector encaixado). No DIO em pe o tipo aparece
+  escrito ao lado da porta; na OLT em pe, ao lado do numero.
+  Padrao ao criar: DIO e saidas de splitter SC/APC, placa GPON SC/UPC,
+  placa de controle, switch e RB LC/UPC. A traseira do DIO e as fibras
+  de cabo sao fusao: nao tem conector.
+- PORTA DUPLEX (agora tambem no DIO): aceita 2 fibras (TX/RX) dos dois
+  lados do adaptador. Duplex e SEMPRE LC: ao marcar duplex a porta vira
+  LC e o SC fica bloqueado. A placa GPON continua travada em simplex.
+  No rastreio, a fibra que entra por tras sai pela fibra par da frente
+  (TX com TX, RX com RX) - uma nao vaza pra outra.
+- ONDE TROCAR: duplo clique numa porta da lista lateral (ou "Editar
+  porta") mostra Tipo (simplex/duplex), Conector (SC/LC) e Polimento
+  (APC/UPC). Pra trocar todas de uma vez: Editar o DIO ("Conector da
+  frente") ou Editar o modulo ("Conector de todas as portas").
+- FUNDIR VARIAS FIBRAS DE UMA VEZ (Shift): clique na primeira fibra,
+  Shift+clique na ultima (ex.: fibras 13 a 24 do cabo) e depois clique
+  na PRIMEIRA porta de destino: funde em sequencia 13->1, 14->2...
+  O rotulo aceita # pra numerar ("Cliente #" vira Cliente 1, 2, 3...).
+  Se faltar porta ou alguma estiver ocupada, avisa e nao cria nenhuma.
+  Um Ctrl+Z desfaz o lote inteiro.
+- Relatorio e planilha: a coluna GBIC virou "Conector" (SC/APC, LC/UPC
+  dx, ou "fusao").
+- Legenda APC/UPC no cabecalho do diagrama.
+
+
+O QUE MUDOU NA B0.30 (nome e marca novos)
+-----------------------------------------
+- NOVO NOME: WaspFiber. O executavel e WaspFiber.exe e as redes sao
+  salvas como .wasp.json. As redes .nix.json (e as .json mais antigas)
+  continuam abrindo normalmente: no Abrir, escolha o filtro
+  "Rede da versao Nix".
+- NOVA MARCA: a vespa com o rastro de fibras, no icone do executavel,
+  na janela, no topo do programa e na tela de rede vazia.
+- Trabalho nao salvo do Nix: na primeira abertura o WaspFiber oferece
+  recuperar (ele procura tambem na pasta antiga).
+
+
+O QUE MUDOU NA B0.29 (correcao)
+-------------------------------
+- ARRASTAR CORRIGIDO: o equipamento andava um pouquinho e parava. Agora
+  ele acompanha o mouse o caminho todo, ate soltar o botao.
+
+
+O QUE MUDOU NA B0.28 (OLT em pe e conectores finos)
+---------------------------------------------------
+- OLT NA VERTICAL, igual ao DIO: cada placa e uma coluna de portas, uma
+  por linha (0, 1, 2...), com a gaiola SFP virada pra borda, o numero e o
+  LED. A porta 0 da placa fica na altura da porta 1 do DIO ao lado:
+  o cordao vai reto. Switch e RB continuam deitados, mas o botao de girar
+  (seta circular) agora vale pra OLT, switch e RB tambem.
+- CONECTORES FINOS: no lugar dos quadrados grandes na ponta das linhas,
+  um plugue fino na cor da fibra com o ferrolho encostado na borda. As
+  pontas das fibras do cabo tambem ficaram mais finas.
+- Redes salvas na B0.27: OLT abre em pe; switch/RB deitados; o DIO
+  fica como voce deixou.
+
+
+O QUE MUDOU NA B0.27 (DIO em pe e arrastar livre)
+-------------------------------------------------
+- DIO NA VERTICAL: uma porta por linha, bandejas de 12, traseira (fusao)
+  de um lado e frente (conector) do outro. Fica na mesma altura das
+  fibras do cabo ao lado: a fibra 5 chega RETA na porta 5. Quem preferir
+  o painel deitado: botao de girar (seta circular) no DIO escolhido, ou
+  Ctrl+K > "girar". Redes antigas abrem com o DIO em pe e reorganizadas.
+- ARRASTAR: pegue o equipamento por QUALQUER parte (nao so pelo titulo)
+  e solte onde quiser. O cursor vira a cruz de mover em cima da caixa e
+  a maozinha em cima das portas (que continuam sendo clique pra fundir).
+  Ao soltar, encaixa numa grade de 10 pra alinhar facil; Ctrl+Z desfaz.
+  O arraste ficou mais leve e a vista nao pula mais.
+- As fibras passam POR BAIXO das caixas: uma linha que cruza um
+  equipamento some atras dele em vez de riscar as portas. O caminho
+  rastreado e os rotulos continuam por cima.
+
+
+O QUE MUDOU NA B0.26 (conexoes faceis de ler)
+---------------------------------------------
+- Cada porta ligada ganhou um conector grande na borda do equipamento,
+  na cor da linha, com o NUMERO DA PORTA do lado (no DIO e nos ativos).
+- As saidas das fibras ficam na altura da propria porta, com espaco
+  entre uma e outra e em ordem (porta 1 em cima da 2): as linhas que vao
+  pro mesmo equipamento nao se cruzam mais. Porta sem fusao nao tem
+  saida, entao nao polui a borda.
+- Quando um lado tem mais fibras ligadas do que cabe na altura da caixa,
+  aparece uma regua de conexao presa na borda, em vez de apertar tudo.
+- PASSE O MOUSE numa linha ou numa porta ligada: a fibra acende, as duas
+  portas sao marcadas e o rodape mostra "porta X <-> porta Y".
+- Linhas mais grossas.
+
+
+O QUE MUDOU NA B0.25 (equipamentos como na vida real)
+-----------------------------------------------------
+- O DIAGRAMA DESENHA O EQUIPAMENTO DE VERDADE:
+  - DIO como o painel: bandejas de 24 portas (2 fileiras de 12), com
+    a TRASEIRA (fusao, na bandeja) de um lado e a FRENTE (conector) do
+    outro. Porta com fusao atras aparece clara; com cordao na frente,
+    verde.
+  - OLT, switch e RB com as gaiolas SFP de cada placa/grupamento: com
+    fusao aparece o modulo encaixado e o LED aceso; porta duplex mostra
+    os dois furos (TX/RX).
+  - CTO/acomodador com o splitter PLC: a ENT de um lado e as saidas
+    S1, S2... conectorizadas do outro.
+- DIO COM DOIS LADOS: cada porta aceita a fusao da fibra do cabo atras
+  E o cordao na frente. No rastreio o sinal atravessa o DIO (traseira
+  <-> frente) e conta 0,5 dB do conector.
+- CABO (tipo novo): informe as fibras (FO) e as fibras por tubo. Tubos e
+  fibras no codigo de cores ABNT NBR 14721: verde, amarelo, branco,
+  azul, vermelho, violeta, marrom, rosa, preto, cinza, laranja, aqua.
+  Cada fibra tem a ponta A e a ponta B, e a linha da fusao sai na cor da
+  fibra. O cordao (frente do DIO, portas de ativo) sai em amarelo.
+- OLT NUMERADA A PARTIR DE 0, como no equipamento (placa GPON: 0 a 15).
+  Switch, RB e DIO continuam a partir de 1. A busca entende "OLT-01 0".
+- ORGANIZAR arruma no caminho do sinal, da esquerda pra direita:
+  cabos de cliente | CTO | cabos | DIO | ativos.
+- REDES ANTIGAS: abrem com as fusoes de DIO na FRENTE e o layout e
+  reorganizado sozinho (as caixas mudaram de tamanho). Confira e salve.
+- A rede de exemplo agora mostra o caminho completo: OLT -> frente do
+  DIO -> bandeja -> cabo C1 -> splitter da CTO -> cabo C2 -> clientes.
+
+
+O QUE MUDOU NA B0.24 (interface nova: minimo + Ctrl+K)
+----------------------------------------------------
+- PALETA DE COMANDOS (Ctrl+K, ou clique no campo do topo): um campo so
+  pra tudo. Digite o que quer fazer ("rastrear", "exportar", "novo",
+  "excel") OU o que procura na rede (cliente, equipamento, modulo,
+  porta) e aperte Enter. Setas escolhem, Esc fecha. Quando acha uma
+  porta ou um cliente, ja oferece "Rastrear a partir de...".
+  Ctrl+L tambem abre a paleta; a busca em tabela continua la como
+  "Busca avancada".
+- SEM A BARRA DE MENU BRANCA do Windows: o menu agora e o botao "..."
+  no canto de cima (abrir, salvar, exportar, ajuda), no tema escuro.
+  A barra de titulo da janela tambem fica escura (Windows 10/11).
+- ICONES NOVOS em toda a interface (desfazer, refazer, zoom, organizar,
+  editar, duplicar...). Parando o mouse em cima aparece o nome e o atalho.
+- MARCA DO NIX: o "N" desenhado como uma fibra ligando dois pontos, no
+  icone do Nix.exe, na janela e no topo do programa.
+- BARRA LATERAL EM CARTOES: cada equipamento com o icone do tipo, as
+  portas em uso e uma barrinha de ocupacao (fica laranja acima de 90%).
+  Clique no cartao: o diagrama vai ate ele e embaixo aparecem as acoes
+  (editar, duplicar, inverter, rastrear, excluir) e a lista de modulos
+  e portas. Duplo clique no cartao edita.
+- DIAGRAMA COM MAIS ESPACO: zoom, centralizar e organizar flutuam no
+  canto do diagrama; o nome do arquivo fica no topo, com um ponto ciano
+  quando ha alteracao nao salva. Ao escolher uma porta, um aviso no alto
+  do diagrama diz o proximo passo.
+- Esc agora fecha, nesta ordem: paleta, menu, porta escolhida e, por
+  ultimo, o destaque do rastreio.
+- Rede vazia mostra um convite pra comecar (novo equipamento ou a rede
+  de exemplo) no lugar do diagrama em branco.
+
+
+O QUE MUDOU NA B0.23 (primeira grande mudanca visual)
+-----------------------------------------------------
+- NOVO NOME: o programa agora se chama Nix. O executavel e Nix.exe e as
+  redes sao salvas como .nix.json. Os arquivos .json da versao anterior
+  continuam abrindo normalmente (menu ... > Abrir, filtro "versao FTTX").
+  Se voce tinha um trabalho nao salvo na versao antiga, o Nix oferece
+  recuperar ele na primeira abertura.
+- VISUAL GRAFITE: tema escuro, minimalista. Fundo carvao, caixas sem
+  faixas coloridas, tipografia leve, hairlines no lugar de bordas
+  grossas, e um unico acento (ciano) pra selecao e caminho rastreado.
+  A janela inteira acompanha: barra lateral, botoes, menus, tabelas,
+  listas e os dialogos.
+- DIAGRAMA MAIS ARREJADO: caixas maiores, mais respiro entre linhas,
+  cabecalho discreto no topo (nome, versao e os numeros da rede) no
+  lugar da legenda cheia de itens.
+- FIBRAS: cinza para a fibra comum; so as duas fibras de uma porta
+  duplex ganham cor (quente e fria) e tracejado. O caminho rastreado
+  aparece em ciano, com um halo por tras.
+- EXPORTACAO: PDF e SVG saem no tema da tela OU em fundo claro, pra
+  imprimir sem gastar tinta - a escolha aparece na hora de exportar.
+  O relatorio PDF ja vem com "fundo claro" marcado por padrao.
+
+O QUE JA VINHA DA VERSAO ANTERIOR (B0.22)
+-----------------------------------------
+1. BUSCA (hoje dentro da paleta, Ctrl+K) - acha, por parte do texto:
+   - equipamento pelo nome ou ID ("centro", "OLT-01");
+   - modulo pelo nome ("splitter rua");
+   - CLIENTE pelo rotulo da fusao ("cliente a", "joao silva");
+   - porta pelo numero ("cto-centro 15", ou so "15").
+   Clicar no resultado leva o diagrama ate ele e marca a porta. Acentos e
+   maiusculas nao atrapalham: "jardim" acha "Jardim Paulista".
+
+2. CRIAR VARIOS (icone de camadas na barra lateral) - cadastra uma
+   leva numerada de uma vez, em vez de repetir o mesmo dialogo 24 vezes.
+   Use ## no nome base pra dizer onde entra o numero: "DIO-##" vira
+   DIO-01, DIO-02... A tela mostra uma previa antes de criar, e um unico
+   Ctrl+Z desfaz o lote inteiro.
+
+3. DUPLICAR (Ctrl+D) - repete o equipamento selecionado com os mesmos
+   modulos, placas e quantidade de portas. A copia nasce SEM fusoes (e o
+   que se quer ao repetir um padrao) e com o proximo numero no nome:
+   "OLT-Central-01" vira "OLT-Central-02".
+
+4. ORGANIZAR (botao Organizar) - arruma todas as caixas em tres colunas
+   (DIOs | acomodadores | ativos), em ordem alfabetica e sem sobreposicao,
+   em vez de voce arrastar uma por uma. Ctrl+Z volta como estava.
+
+5. PENDENCIAS E CAPACIDADE (F5) - uma janela com duas abas:
+   - Pendencias: splitter sem a ENT fundida (as saidas nao levam sinal),
+     porta duplex com so uma fibra ligada, equipamento cadastrado sem
+     nenhuma fusao, nomes repetidos e fusoes sem rotulo. Os erros vem
+     primeiro; duplo clique leva ate o problema no diagrama.
+   - Capacidade: quantas portas livres existem em cada equipamento - a
+     pergunta de todo dia ("onde ainda cabe cliente?").
+   As duas saem em CSV e tambem entram no relatorio PDF completo.
+
+6. O relatorio PDF sai completo: diagrama + tabela porta a porta +
+   pendencias + capacidade. E a exportacao pro Excel deixa escolher qual
+   das tres tabelas voce quer.
+
+
+O QUE JA VINHA DA VERSAO ANTERIOR
+---------------------------------
+- RASTREAR O CAMINHO DA FIBRA (Ctrl+F): selecione uma porta e veja por
+  onde o sinal passa, a perda em dB e a potencia estimada em cada ponta
+  (verde = ok, laranja = alerta abaixo de -25 dBm, vermelho = critico
+  abaixo de -28 dBm). Funciona nos dois sentidos: da OLT pro cliente, ou
+  do cliente de volta pra OLT ("quem cai se esse cabo romper?").
+  "Destacar no diagrama" pinta o caminho por cima das outras fibras.
+- DESFAZER (Ctrl+Z) e REFAZER (Ctrl+Y).
+- AVISO DE TRABALHO NAO SALVO ao fechar a janela, e o titulo mostrando
+  "*(nao salvo)".
+- RECUPERACAO AUTOMATICA: copia de seguranca a cada alteracao; se faltar
+  luz, o programa oferece recuperar na proxima abertura.
+- Exportar diagrama em PDF, SVG ou PS, e relatorios em CSV.
+
+
+COMO USAR
+---------
+1. Ctrl+K > digite "exemplo" > Enter, pra ver o programa funcionando
+   (ou o botao "Ver a rede de exemplo" quando a rede esta vazia).
+
+2. O "+" da barra lateral cadastra um equipamento:
+   - DIO         -> informe a quantidade de portas. Cada porta tem
+                    traseira (fusao) e frente (conector), 1 de cada.
+   - CABO        -> informe as fibras (FO) e quantas por tubo.
+   - ACOMODADOR  -> informe quantos splitters ele ja nasce com.
+   - OLT/SWITCH/RB -> sem quantidade: as portas vem dos modulos.
+   Pra cadastrar muitos iguais, use o icone de camadas ao lado do "+"
+   ("Criar varios") ou "Duplicar" (Ctrl+D).
+
+3. Clique no cartao do equipamento. Embaixo, em MODULOS, o "+" adiciona:
+   - OLT         -> placa GPON-8, GPON-16 (GBIC travado em simplex) ou
+                    CONTROLE (4 portas, simplex ou duplex por porta).
+   - SWITCH/RB   -> grupamento SFP ou QSFP com a quantidade de portas que
+                    voce definir (GBIC livre por porta).
+   - ACOMODADOR  -> splitter 1x2, 1x4, 1x8 ou 1x16.
+   O lapis e a lixeira ao lado editam/excluem o modulo escolhido na lista.
+
+4. PRA FUNDIR: clique numa porta no diagrama e depois clique na outra.
+   Vale qualquer combinacao - DIO com DIO, ativo com ativo, e ate duas
+   portas do mesmo equipamento. O programa pergunta um rotulo opcional
+   (TX, RX, nome do cliente...) - vale a pena preencher, e por ele que a
+   busca acha o cliente depois. Clicar numa porta ja cheia oferece
+   remover a fusao.
+
+5. Duplo clique numa porta na lista da barra lateral abre o dialogo
+   completo: trocar o GBIC (simplex/duplex) e listar / remover /
+   adicionar fusoes.
+
+6. NAVEGAR: arraste o equipamento (por qualquer parte) pra move-lo.
+   Roda do mouse da zoom, arrastar numa area vazia move a vista. Os
+   botoes no canto do diagrama: afastar, aproximar, centralizar e
+   organizar as colunas.
+
+7. Menu "..." > Salvar grava a rede num .wasp.json que reabre depois.
+
+8. Menu "..." > Exportar diagrama (PDF/SVG/PS), Relatorio PDF completo ou
+   Planilha pro Excel (portas, pendencias ou capacidade).
+
+
+ATALHOS
+-------
+Ctrl+K  paleta de comandos e busca      Ctrl+F  rastrear a fibra
+Ctrl+D  duplicar                        F5      pendencias e capacidade
+Ctrl+S  salvar                          Ctrl+O  abrir
+Ctrl+Z  desfazer                        Ctrl+Y  refazer
+Esc     fecha / cancela / tira destaque F1      ajuda
+
+
+REGRAS QUE O PROGRAMA GARANTE
+-----------------------------
+- Porta simplex aceita 1 fusao; duplex aceita 2 (podendo ir pra
+  equipamentos diferentes - o caso real de TX/RX em DIOs distintos).
+- Porta de DIO nao tem GBIC: 1 fusao atras e 1 cordao na frente.
+- Fibra de cabo: 1 fusao em cada ponta (A e B).
+- Placas GPON ficam travadas em simplex; a de Controle e livre.
+- A numeracao de porta reinicia em 1 a cada modulo e a cada DIO.
+- Num splitter, a porta 1 e a entrada (ENT) e as outras sao as saidas
+  (S1, S2...). No diagrama a entrada fica do lado oposto das saidas.
+- Nao da pra conectar uma porta a ela mesma, nem reduzir a quantidade de
+  portas de um DIO/grupamento se as portas removidas tiverem fusao - o
+  programa diz exatamente quais portas estao travando.
+- No rastreio, o splitter so distribui no sentido OLT -> cliente; subindo
+  (cliente -> OLT) ele combina, entao o caminho nao "espalha" de volta.
+
+
+SE QUISER CONFERIR QUE ESTA TUDO SAO
+------------------------------------
+Abra o Prompt de Comando na pasta do arquivo e rode:
+
+    WaspFiber.exe --autoteste
+
+Ele monta uma rede de exemplo, exercita busca, rastreio, lote, duplicar,
+layout, pendencias e todas as exportacoes, e escreve o resultado num
+arquivo de texto (o caminho aparece na tela). Tambem da pra rodar pela
+paleta: Ctrl+K > "autoteste".
+
+
+VALORES DE PERDA USADOS NO RASTREIO
+-----------------------------------
+Fusao/cordao 0,1 dB; conector do DIO 0,5 dB; splitter 1x2 = 3,5 / 1x4 = 7,2 / 1x8 = 10,5 / 1x16 = 13,7 dB.
+Sensibilidade da ONU considerada: -28 dBm (alerta a partir de -25 dBm).
+NAO inclui a atenuacao do cabo (0,35 dB/km tipico), porque este cadastro
+nao guarda a metragem da rota. Pra usar valores medidos (OTDR), edite
+PERDA_FUSAO_DB, PERDA_CONECTOR_DB e PERDA_SPLITTER_DB no waspfiber.py e gere o .exe de novo.
+
+
+QUEM QUISER MEXER NO CODIGO
+---------------------------
+O programa e o waspfiber.py (modelo, desenho, exportacoes e janela), mais
+o waspfiber_ui.py (botoes, menus, cartoes) e o waspfiber_icones.py (icones Lucide,
+licenca ISC, ja embutidos). Nenhuma dependencia externa: so precisa do
+Python 3.8+ com tkinter, que ja vem junto no Windows.
+Pra rodar direto: python waspfiber.py
+Os testes (teste_core.py e teste_gui.py) verificam modelo, busca,
+rastreio, lote, layout, pendencias, exportacoes e a interface.
