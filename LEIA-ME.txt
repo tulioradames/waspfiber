@@ -1,4 +1,4 @@
-WASPFIBER - diagramas de fusao e fibra optica (FTTX)         versao B0.34
+WASPFIBER - diagramas de fusao e fibra optica (FTTX)         versao B0.35
 =========================================================================
 
 COMO ABRIR
@@ -6,6 +6,16 @@ COMO ABRIR
 Clique duas vezes em WaspFiber.exe. E isso - nao precisa instalar nada.
 Na primeira vez o Windows pode avisar "O Windows protegeu o computador":
 clique em "Mais informacoes" > "Executar assim mesmo".
+
+
+O QUE MUDOU NA B0.35 (mapa mais rapido)
+---------------------------------------
+- MAPA MAIS RAPIDO: 8 downloads ao mesmo tempo, o meio da tela carrega
+  primeiro, o que saiu da tela nao e mais baixado e, ao dar zoom, aparece
+  na hora a imagem do zoom anterior ampliada ate a nova chegar. O satelite
+  enche a tela em ~2,5 s (antes ~6 s); as ruas em menos de 1 s.
+- O programa lembra a ultima escolha (Mapa/Satelite).
+- Nada de chave, conta ou cartao: o mapa e gratuito pra quem usa.
 
 
 O QUE MUDOU NA B0.34 (localizacao no mapa)

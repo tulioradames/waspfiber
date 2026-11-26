@@ -1,22 +1,19 @@
 # -*- coding: utf-8 -*-
-"""Localizacao do diagrama no mapa (B0.34).
+"""Localizacao do diagrama no mapa (B0.34 / B0.35).
 
 Cada rede (.wasp.json) e um LOCAL do campo - um POP, uma caixa de emenda
 (CEO) ou uma CTO - com coordenada. Este modulo tem:
 
 - ler_coordenada(): entende o que a pessoa cola - "-23.55, -46.63", o link
   do Google Maps, ou o formato do Google Earth (23°33'01.8"S 46°38'00.0"W);
-- os links pra abrir o ponto no Google Maps e no Google Earth (navegador,
-  sem chave de API);
-- MapaWidget: um mapa de verdade dentro do programa (ruas do OpenStreetMap
-  ou satelite da Esri), com arrastar, zoom na roda e clique pra marcar o
-  ponto. Os tiles sao baixados em segundo plano e guardados em disco; sem
-  internet o mapa avisa e a coordenada continua podendo ser digitada;
-- buscar_endereco() / endereco_do_ponto(): busca de endereco (Nominatim,
-  do OpenStreetMap).
+- os links pra abrir o ponto no Google Maps e no Google Earth (navegador);
+- MapaWidget: um mapa de verdade dentro do programa, com arrastar, zoom na
+  roda e clique pra marcar o ponto;
+- buscar_endereco() / endereco_do_ponto(): busca de endereco (Nominatim).
 
-Os tiles do proprio Google nao podem ser usados fora da API paga dele; por
-isso o mapa interno usa OpenStreetMap/Esri e o Google abre no navegador.
+FONTES DO MAPA
+- Ruas do OpenStreetMap e satelite da Esri, sem chave e sem custo pra quem
+  usa. (Proximo passo: o servidor de mapas do proprio WaspFiber.)
 
 So biblioteca padrao (tkinter + urllib): o PNG e lido pelo proprio Tk.
 """
@@ -25,15 +22,16 @@ import base64
 import json
 import math
 import os
-import queue
 import re
 import threading
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
 import tkinter as tk
 
-AGENTE = "WaspFiber/B0.34 (diagramas FTTX; desktop)"
+AGENTE = "WaspFiber/B0.35 (diagramas FTTX; desktop)"
 
 # tipos de local que um diagrama pode ser
 TIPOS_LOCAL = (("POP", "POP"), ("CEO", "Caixa de emenda (CEO)"), ("CTO", "CTO"))
@@ -45,10 +43,10 @@ _RAIO_TERRA_M = 6378137.0
 _LIMITE_MERC = math.pi * _RAIO_TERRA_M      # 20037508.34 m
 
 FONTES = {
-    "mapa": {"rotulo": "Mapa",
+    "mapa": {"rotulo": "Mapa", "zoom_max": 19,
              "url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
              "credito": "© colaboradores do OpenStreetMap"},
-    "satelite": {"rotulo": "Satelite",
+    "satelite": {"rotulo": "Satelite", "zoom_max": 19,
                  # o servico de tiles da Esri entrega JPEG (o Tk nao le sem
                  # PIL); o "export" da mesma camada entrega PNG do mesmo recorte
                  "url": ("https://server.arcgisonline.com/ArcGIS/rest/services/"
@@ -56,6 +54,7 @@ FONTES = {
                          "&imageSR=3857&size=256,256&format=png&f=image"),
                  "credito": "Imagens © Esri, Maxar, Earthstar Geographics"},
 }
+FONTES_DISPONIVEIS = ("mapa", "satelite")
 
 
 # ============================================================================
@@ -249,7 +248,7 @@ def url_do_tile(fonte, zoom, x, y):
 
 
 # ============================================================================
-#  REDE (tiles, busca de endereco) - sempre fora da thread da interface
+#  CONFIGURACAO (ultima vista, fonte preferida)
 # ============================================================================
 
 def pasta_cache(base=None):
@@ -258,64 +257,47 @@ def pasta_cache(base=None):
     return os.path.join(base, "WaspFiber", "mapa")
 
 
-def _baixar(url, tempo=15):
-    pedido = urllib.request.Request(url, headers={"User-Agent": AGENTE,
-                                                  "Accept-Language": "pt-BR,pt;q=0.9"})
-    with urllib.request.urlopen(pedido, timeout=tempo) as resposta:
-        return resposta.read()
+def _caminho_config(pasta=None):
+    return os.path.join(pasta or pasta_cache(), "config.json")
 
 
-def baixar_tile(fonte, zoom, x, y, pasta=None):
-    """Bytes PNG do tile (do cache em disco, ou da internet). Lanca excecao
-    se nao conseguir."""
-    caminho = os.path.join(pasta or pasta_cache(), fonte, str(zoom), str(x), "%d.png" % y)
-    if os.path.exists(caminho):
-        with open(caminho, "rb") as fp:
-            dados = fp.read()
-        if dados[:4] == b"\x89PNG":
-            return dados
-    dados = _baixar(url_do_tile(fonte, zoom, x, y))
-    if dados[:4] != b"\x89PNG":
-        raise ValueError("o servidor do mapa nao devolveu uma imagem PNG")
+def ler_config(pasta=None):
     try:
-        os.makedirs(os.path.dirname(caminho), exist_ok=True)
-        with open(caminho, "wb") as fp:
-            fp.write(dados)
+        with open(_caminho_config(pasta), encoding="utf-8") as fp:
+            dados = json.load(fp)
+        return dados if isinstance(dados, dict) else {}
+    except Exception:
+        return {}
+
+
+def gravar_config(mudancas, pasta=None):
+    """Mescla as mudancas no config.json (None apaga a chave)."""
+    dados = ler_config(pasta)
+    for chave, valor in mudancas.items():
+        if valor is None:
+            dados.pop(chave, None)
+        else:
+            dados[chave] = valor
+    try:
+        pasta = pasta or pasta_cache()
+        os.makedirs(pasta, exist_ok=True)
+        tmp = _caminho_config(pasta) + ".novo"
+        with open(tmp, "w", encoding="utf-8") as fp:
+            json.dump(dados, fp, ensure_ascii=False, indent=1)
+        os.replace(tmp, _caminho_config(pasta))
+        return True
     except OSError:
-        pass
-    return dados
+        return False
 
 
-def buscar_endereco(texto, limite=6):
-    """[(descricao, lat, lon), ...] para um endereco (OpenStreetMap/Nominatim).
-    Prioriza o Brasil. Lanca excecao se nao houver conexao."""
-    consulta = urllib.parse.urlencode({"q": texto, "format": "jsonv2", "limit": limite,
-                                       "countrycodes": "br", "addressdetails": 0})
-    dados = json.loads(_baixar("https://nominatim.openstreetmap.org/search?" + consulta)
-                       .decode("utf-8"))
-    return [(d.get("display_name", ""), float(d["lat"]), float(d["lon"])) for d in dados]
+def fontes_disponiveis():
+    return FONTES_DISPONIVEIS
 
 
-def endereco_do_ponto(lat, lon):
-    """(endereco, cidade) do ponto - geocodificacao reversa do Nominatim."""
-    consulta = urllib.parse.urlencode({"lat": "%.7f" % lat, "lon": "%.7f" % lon,
-                                       "format": "jsonv2", "zoom": 18, "addressdetails": 1})
-    d = json.loads(_baixar("https://nominatim.openstreetmap.org/reverse?" + consulta)
-                   .decode("utf-8"))
-    a = d.get("address") or {}
-    rua = a.get("road") or a.get("pedestrian") or a.get("highway") or ""
-    numero = a.get("house_number") or ""
-    bairro = a.get("suburb") or a.get("neighbourhood") or a.get("quarter") or ""
-    cidade = a.get("city") or a.get("town") or a.get("village") or a.get("municipality") or ""
-    uf = a.get("ISO3166-2-lvl4", "").replace("BR-", "") or a.get("state", "")
-    endereco = ", ".join(p for p in ((rua + (", " + numero if numero else "")), bairro) if p)
-    cidade_uf = cidade + ((" - " + uf) if (cidade and uf) else "")
-    return endereco or d.get("display_name", ""), cidade_uf
+def fonte_inicial():
+    preferida = ler_config().get("fonte")
+    return preferida if preferida in FONTES_DISPONIVEIS else FONTES_DISPONIVEIS[0]
 
-
-# ============================================================================
-#  ULTIMA VISTA (o mapa abre onde a pessoa estava trabalhando)
-# ============================================================================
 
 VISTA_PADRAO = (-15.78, -47.93, 4)    # Brasil inteiro
 
@@ -343,6 +325,75 @@ def gravar_ultima_vista(lat, lon, zoom, pasta=None):
 
 
 # ============================================================================
+#  REDE (tiles, busca de endereco) - fora da thread da tela
+# ============================================================================
+
+class ErroMapa(Exception):
+    """Erro do servidor do mapa, ja com a mensagem pra pessoa."""
+
+
+def _pedir(url, dados=None, tempo=15):
+    cabecalho = {"User-Agent": AGENTE, "Accept-Language": "pt-BR,pt;q=0.9"}
+    if dados is not None:
+        cabecalho["Content-Type"] = "application/json"
+        dados = json.dumps(dados).encode("utf-8")
+    pedido = urllib.request.Request(url, data=dados, headers=cabecalho,
+                                    method="POST" if dados is not None else "GET")
+    with urllib.request.urlopen(pedido, timeout=tempo) as resposta:
+        return resposta.read()
+
+
+_baixar = _pedir
+
+
+def baixar_tile(fonte, zoom, x, y, pasta=None):
+    """Bytes PNG do tile: do cache em disco ou da internet."""
+    caminho = os.path.join(pasta or pasta_cache(), fonte, str(zoom), str(x), "%d.png" % y)
+    if os.path.exists(caminho):
+        with open(caminho, "rb") as fp:
+            dados = fp.read()
+        if dados[:4] == b"\x89PNG":
+            return dados
+    dados = _pedir(url_do_tile(fonte, zoom, x, y))
+    if dados[:4] != b"\x89PNG":
+        raise ErroMapa("o servidor do mapa nao devolveu uma imagem PNG")
+    try:
+        os.makedirs(os.path.dirname(caminho), exist_ok=True)
+        with open(caminho, "wb") as fp:
+            fp.write(dados)
+    except OSError:
+        pass
+    return dados
+
+
+def buscar_endereco(texto, limite=6):
+    """[(descricao, lat, lon), ...] para um endereco (OpenStreetMap/Nominatim).
+    Prioriza o Brasil. Lanca excecao se nao houver conexao."""
+    consulta = urllib.parse.urlencode({"q": texto, "format": "jsonv2", "limit": limite,
+                                       "countrycodes": "br", "addressdetails": 0})
+    dados = json.loads(_pedir("https://nominatim.openstreetmap.org/search?" + consulta)
+                       .decode("utf-8"))
+    return [(d.get("display_name", ""), float(d["lat"]), float(d["lon"])) for d in dados]
+
+
+def endereco_do_ponto(lat, lon):
+    """(endereco, cidade) do ponto - geocodificacao reversa do Nominatim."""
+    consulta = urllib.parse.urlencode({"lat": "%.7f" % lat, "lon": "%.7f" % lon,
+                                       "format": "jsonv2", "zoom": 18, "addressdetails": 1})
+    d = json.loads(_pedir("https://nominatim.openstreetmap.org/reverse?" + consulta)
+                   .decode("utf-8"))
+    a = d.get("address") or {}
+    rua = a.get("road") or a.get("pedestrian") or a.get("highway") or ""
+    numero = a.get("house_number") or ""
+    bairro = a.get("suburb") or a.get("neighbourhood") or a.get("quarter") or ""
+    cidade = a.get("city") or a.get("town") or a.get("village") or a.get("municipality") or ""
+    uf = a.get("ISO3166-2-lvl4", "").replace("BR-", "") or a.get("state", "")
+    endereco = ", ".join(p for p in ((rua + (", " + numero if numero else "")), bairro) if p)
+    cidade_uf = cidade + ((" - " + uf) if (cidade and uf) else "")
+    return endereco or d.get("display_name", ""), cidade_uf
+
+
+# ============================================================================
 #  WIDGET DO MAPA
 # ============================================================================
 
@@ -350,13 +401,20 @@ class MapaWidget(tk.Canvas):
     """Mapa navegavel: arrastar move, roda do mouse da zoom no cursor e um
     clique (sem arrastar) marca o ponto e chama ao_marcar(lat, lon).
 
+    Rapido de usar (B0.35): 8 downloads em paralelo, os tiles do centro vem
+    primeiro, pedidos que sairam da tela sao descartados e, enquanto o tile
+    novo nao chega, aparece o do zoom anterior ampliado (nada de quadrado
+    vazio).
+
     baixador(fonte, z, x, y) -> bytes PNG roda nas threads de fundo; nos
     testes da pra trocar por um que nao usa a internet."""
 
-    MAX_IMAGENS = 400
+    MAX_IMAGENS = 500
+    MAX_PREVIAS = 120
+    TRABALHADORES = 8
 
     def __init__(self, pai, tema, largura=620, altura=440, ao_marcar=None,
-                 baixador=None, fonte="mapa", centro=None, zoom=None, **kw):
+                 baixador=None, fonte=None, centro=None, zoom=None, **kw):
         self.tema = tema
         super().__init__(pai, width=largura, height=altura, bg=tema.get("fundo", "#1c1b19"),
                          highlightthickness=1, highlightbackground=tema.get("ui_borda", "#333"),
@@ -364,22 +422,27 @@ class MapaWidget(tk.Canvas):
         vista = ler_ultima_vista()
         self.lat, self.lon = centro if centro else vista[:2]
         self.zoom = zoom if zoom is not None else (17 if centro else vista[2])
-        self.fonte = fonte
+        self.fonte = fonte if fonte in FONTES else fonte_inicial()
         self.marcador = None                  # (lat, lon)
         self.ao_marcar = ao_marcar
         self.baixador = baixador or baixar_tile
+        self.aviso = ""                       # faixa de aviso no alto do mapa
         self._imagens = {}                    # (fonte, z, x, y) -> PhotoImage
         self._ordem = []                      # LRU simples das imagens
-        self._pedidos = set()                 # tiles ja pedidos (em andamento)
+        self._previas = {}                    # tile ampliado do zoom anterior
+        self._em_andamento = set()
         self._falhas = set()
-        self._fila_saida = queue.Queue()      # (chave, bytes ou excecao)
-        self._fila_entrada = queue.Queue()
+        self._desejados = []                  # fila: do centro pra borda
+        self._desejados_set = set()
+        self._cond = threading.Condition()
+        self._chegadas = []                   # (chave, bytes ou excecao)
+        self._trava_chegadas = threading.Lock()
         self._inicio_arraste = None
         self._arrastou = False
         self._redesenho = None
         self.erro_rede = None
         self._vivo = True
-        for _ in range(4):
+        for _ in range(self.TRABALHADORES):
             threading.Thread(target=self._trabalhador, daemon=True).start()
         self.bind("<ButtonPress-1>", self._press)
         self.bind("<B1-Motion>", self._motion)
@@ -389,48 +452,63 @@ class MapaWidget(tk.Canvas):
         self.bind("<Button-5>", lambda e: self.aplicar_zoom(-1, (e.x, e.y)))
         self.bind("<Configure>", lambda _e: self.redesenhar())
         self.bind("<Destroy>", self._destruir, add="+")
-        self.after(60, self._receber)
+        self.after(40, self._receber)
 
     # ---------------- threads de download ----------------
     def _trabalhador(self):
         while True:
-            chave = self._fila_entrada.get()
-            if chave is None:
-                return
+            with self._cond:
+                while self._vivo and not self._desejados:
+                    self._cond.wait()
+                if not self._vivo:
+                    return
+                chave = self._desejados.pop(0)
+                self._desejados_set.discard(chave)
+                self._em_andamento.add(chave)
             fonte, z, x, y = chave
             try:
                 resultado = self.baixador(fonte, z, x, y)
             except Exception as erro:          # sem internet, servidor fora...
                 resultado = erro
-            self._fila_saida.put((chave, resultado))
+            with self._trava_chegadas:
+                self._chegadas.append((chave, resultado))
+
+    def _pedir_tiles(self, chaves):
+        """Troca a fila pelos tiles que a tela precisa agora (ja na ordem:
+        do centro pra fora). O que saiu da tela nem e baixado."""
+        with self._cond:
+            self._desejados = [c for c in chaves if c not in self._em_andamento]
+            self._desejados_set = set(self._desejados)
+            if self._desejados:
+                self._cond.notify_all()
 
     def _receber(self):
         if not self._vivo:
             return
+        with self._trava_chegadas:
+            chegadas, self._chegadas = self._chegadas, []
         chegou = False
-        try:
-            while True:
-                chave, resultado = self._fila_saida.get_nowait()
-                self._pedidos.discard(chave)
-                if isinstance(resultado, Exception):
-                    self._falhas.add(chave)
-                    self.erro_rede = str(resultado)
-                    chegou = True
-                    continue
-                try:
-                    imagem = tk.PhotoImage(master=self,
-                                           data=base64.b64encode(resultado).decode("ascii"))
-                except tk.TclError:
-                    self._falhas.add(chave)
-                    continue
-                self._guardar_imagem(chave, imagem)
-                self.erro_rede = None
+        for chave, resultado in chegadas:
+            with self._cond:
+                self._em_andamento.discard(chave)
+            if isinstance(resultado, Exception):
+                self._falhas.add(chave)
+                self.erro_rede = str(resultado)
                 chegou = True
-        except queue.Empty:
-            pass
+                continue
+            try:
+                imagem = tk.PhotoImage(master=self,
+                                       data=base64.b64encode(resultado).decode("ascii"))
+            except tk.TclError:
+                self._falhas.add(chave)
+                continue
+            self._guardar_imagem(chave, imagem)
+            self._previas.pop(chave, None)
+            self.erro_rede = None
+            chegou = True
         if chegou:
             self.redesenhar()
-        self.after(60, self._receber)
+        self.after(40, self._receber)
 
     def _guardar_imagem(self, chave, imagem):
         self._imagens[chave] = imagem
@@ -440,38 +518,72 @@ class MapaWidget(tk.Canvas):
             if velha in self._imagens and velha not in self._ordem:
                 del self._imagens[velha]
 
+    def _previa(self, chave):
+        """O tile pai (ate 4 zooms acima) recortado e ampliado - aparece na
+        hora, ate o tile de verdade chegar."""
+        if chave in self._previas:
+            return self._previas[chave]
+        fonte, z, x, y = chave
+        for subida in range(1, 5):
+            if z - subida < 0:
+                break
+            pai = self._imagens.get((fonte, z - subida, x >> subida, y >> subida))
+            if pai is None:
+                continue
+            lado = TAM_TILE >> subida
+            ox = (x - ((x >> subida) << subida)) * lado
+            oy = (y - ((y >> subida) << subida)) * lado
+            try:
+                previa = tk.PhotoImage(master=self, width=TAM_TILE, height=TAM_TILE)
+                previa.tk.call(previa, "copy", pai, "-from", ox, oy, ox + lado, oy + lado,
+                               "-zoom", 1 << subida)
+            except tk.TclError:
+                return None
+            if len(self._previas) >= self.MAX_PREVIAS:
+                self._previas.pop(next(iter(self._previas)))
+            self._previas[chave] = previa
+            return previa
+        return None
+
     def _destruir(self, evento):
         if evento.widget is not self:
             return
         self._vivo = False
         gravar_ultima_vista(self.lat, self.lon, self.zoom)
-        for _ in range(4):
-            self._fila_entrada.put(None)
+        with self._cond:
+            self._desejados = []
+            self._cond.notify_all()
 
     # ---------------- navegacao ----------------
+    def zoom_max(self):
+        return min(ZOOM_MAX, FONTES[self.fonte]["zoom_max"])
+
     def centralizar(self, lat, lon, zoom=None):
         self.lat, self.lon = lat, lon
         if zoom is not None:
-            self.zoom = max(ZOOM_MIN, min(ZOOM_MAX, int(zoom)))
+            self.zoom = max(ZOOM_MIN, min(self.zoom_max(), int(zoom)))
         self.redesenhar()
 
     def marcar(self, lat, lon, centralizar=False, avisar=False):
         self.marcador = (lat, lon) if lat is not None else None
         if centralizar and lat is not None:
             self.lat, self.lon = lat, lon
-            self.zoom = max(self.zoom, 16)
+            self.zoom = max(self.zoom, 17)
         self.redesenhar()
         if avisar and self.ao_marcar and lat is not None:
             self.ao_marcar(lat, lon)
 
-    def trocar_fonte(self, fonte):
+    def trocar_fonte(self, fonte, aviso=""):
         if fonte in FONTES and fonte != self.fonte:
             self.fonte = fonte
             self._falhas = set()
+            self._previas = {}
+            self.zoom = min(self.zoom, self.zoom_max())
+            self.aviso = aviso
             self.redesenhar()
 
     def aplicar_zoom(self, passo, ancora=None):
-        novo = max(ZOOM_MIN, min(ZOOM_MAX, self.zoom + passo))
+        novo = max(ZOOM_MIN, min(self.zoom_max(), self.zoom + passo))
         if novo == self.zoom:
             return
         w, h = self._tamanho()
@@ -546,7 +658,8 @@ class MapaWidget(tk.Canvas):
         cx, cy = latlon_para_pixel(self.lat, self.lon, self.zoom)
         x0, y0 = cx - w / 2.0, cy - h / 2.0
         n = 2 ** self.zoom
-        faltando = 0
+        faltando = []
+        falhou_na_tela = False
         for ty in range(int(math.floor(y0 / TAM_TILE)), int(math.floor((y0 + h) / TAM_TILE)) + 1):
             if ty < 0 or ty >= n:
                 continue
@@ -554,16 +667,20 @@ class MapaWidget(tk.Canvas):
                 px, py = tx * TAM_TILE - x0, ty * TAM_TILE - y0
                 chave = (self.fonte, self.zoom, tx % n, ty)
                 imagem = self._imagens.get(chave)
+                if imagem is None:
+                    imagem = self._previa(chave)
+                    falhou_na_tela = falhou_na_tela or chave in self._falhas
+                    if chave not in self._falhas:
+                        meio = (px + TAM_TILE / 2.0 - w / 2.0) ** 2 + (py + TAM_TILE / 2.0 - h / 2.0) ** 2
+                        faltando.append((meio, chave))
                 if imagem is not None:
                     self.create_image(px, py, image=imagem, anchor="nw")
-                    continue
-                faltando += 1
-                self.create_rectangle(px, py, px + TAM_TILE, py + TAM_TILE,
-                                      outline=t.get("ui_borda", "#333"),
-                                      fill=t.get("ui_painel", "#222"))
-                if chave not in self._pedidos and chave not in self._falhas:
-                    self._pedidos.add(chave)
-                    self._fila_entrada.put(chave)
+                else:
+                    self.create_rectangle(px, py, px + TAM_TILE, py + TAM_TILE,
+                                          outline=t.get("ui_borda", "#333"),
+                                          fill=t.get("ui_painel", "#222"))
+        # baixa primeiro o que esta no meio da tela
+        self._pedir_tiles([c for _, c in sorted(faltando)])
 
         if self.marcador:
             self._desenhar_pino(*self.tela_do_ponto(*self.marcador))
@@ -579,14 +696,16 @@ class MapaWidget(tk.Canvas):
             self.create_rectangle(caixa[0] - 4, caixa[1] - 2, caixa[2] + 2, caixa[3] + 1,
                                   fill="#f2f2f2", outline="")
             self.tag_raise(fundo)
-        self.create_text(8, h - 5, text="zoom %d" % self.zoom, anchor="sw", fill="#ffffff",
+        self.create_text(w - 8, 8, text="zoom %d" % self.zoom, anchor="ne", fill="#ffffff",
                          font=("TkDefaultFont", 8))
-        if faltando and self._falhas and self.erro_rede:
+        texto_aviso = self.aviso
+        if not texto_aviso and falhou_na_tela and self.erro_rede:
+            texto_aviso = ("Sem conexao com o servidor do mapa. A coordenada pode ser "
+                           "digitada ou colada ao lado.")
+        if texto_aviso:
             self.create_rectangle(0, 0, w, 26, fill=t.get("ui_painel", "#222"), outline="")
             self.create_text(10, 13, anchor="w", fill=t.get("ui_aviso", "#d7a143"),
-                             font=("TkDefaultFont", 8),
-                             text="Sem conexao com o servidor do mapa. A coordenada "
-                                  "pode ser digitada ou colada ao lado.")
+                             font=("TkDefaultFont", 8), text=texto_aviso, width=w - 20)
 
     def _desenhar_pino(self, x, y):
         cor = self.tema.get("ui_acento", "#4ad0e4")

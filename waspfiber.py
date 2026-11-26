@@ -30,7 +30,7 @@ import waspfiber_ui as nix_ui   # icones, botoes, menus e cartoes da interface
 import waspfiber_mapa as mapa   # localizacao do diagrama (B0.34)
 
 APP_NOME = "WaspFiber"
-VERSAO = "B0.34"
+VERSAO = "B0.35"
 EXTENSAO = ".wasp.json"
 EXTENSAO_NIX = ".nix.json"      # redes salvas quando o programa se chamava Nix
 
@@ -3730,22 +3730,32 @@ class DialogLocal(DialogoBase):
         lado.grid(row=0, column=1, sticky="nsew")
         topo = ttk.Frame(lado)
         topo.pack(fill="x", pady=(0, 6))
-        ttk.Label(topo, text="Clique no mapa para marcar o local. Arraste para mover, "
-                             "roda do mouse para zoom.", style="Fraco.TLabel").pack(side="left")
-        self.var_fonte = tk.StringVar(value="mapa")
-        for chave in ("satelite", "mapa"):
-            ttk.Radiobutton(topo, text=mapa.FONTES[chave]["rotulo"], value=chave,
-                            variable=self.var_fonte,
-                            command=lambda: self.mapa.trocar_fonte(self.var_fonte.get())
-                            ).pack(side="right", padx=(8, 0))
+        ttk.Label(topo, text="Clique no mapa para marcar o local. Arraste move, "
+                             "roda do mouse da zoom.", style="Fraco.TLabel").pack(side="left")
+        self.var_fonte = tk.StringVar(value=mapa.fonte_inicial())
+        self.quadro_fontes = ttk.Frame(topo)
+        self.quadro_fontes.pack(side="right")
+        self._montar_fontes()
         centro = None if self.local["lat"] is None else (self.local["lat"], self.local["lon"])
-        self.mapa = mapa.MapaWidget(lado, t, largura=640, altura=470, centro=centro,
-                                    ao_marcar=self._marcado_no_mapa, baixador=self.baixador)
+        self.mapa = mapa.MapaWidget(lado, t, largura=680, altura=500, centro=centro,
+                                    ao_marcar=self._marcado_no_mapa, baixador=self.baixador,
+                                    fonte=self.var_fonte.get())
         self.mapa.pack(fill="both", expand=True)
         if centro:
             self.mapa.marcar(*centro)
         self._ler_coord()
         return self.e_nome
+
+    # ---------------- fonte do mapa ----------------
+    def _montar_fontes(self):
+        for chave in mapa.fontes_disponiveis():
+            ttk.Radiobutton(self.quadro_fontes, text=mapa.FONTES[chave]["rotulo"], value=chave,
+                            variable=self.var_fonte, command=self._escolher_fonte
+                            ).pack(side="left", padx=(8, 0))
+
+    def _escolher_fonte(self):
+        self.mapa.trocar_fonte(self.var_fonte.get())
+        mapa.gravar_config({"fonte": self.var_fonte.get()})
 
     # ---------------- coordenada ----------------
     def _ponto(self):

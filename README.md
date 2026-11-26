@@ -14,7 +14,7 @@ Diagramas de fusão e fibra óptica (FTTX) para Windows: um único `.exe`, sem i
 - Fusão por clique, ou **várias de uma vez** (clique na primeira, Shift+clique na última, clique no destino).
 - **Rastreio** do caminho da fibra com perda em dB e potência estimada em cada ponta.
 - **Pendências** (splitter sem entrada, duplex pela metade, nomes repetidos) e **capacidade** (portas livres).
-- **Localização no mapa**: cada diagrama é um POP, caixa de emenda ou CTO com coordenada — mapa (ruas/satélite) dentro do programa, cola coordenada ou link do Google Maps, abre no **Google Maps** e no **Google Earth**.
+- **Localização no mapa**: cada diagrama é um POP, caixa de emenda ou CTO com coordenada — mapa (ruas/satélite) dentro do programa, sem chave nem custo, cola coordenada ou link do Google Maps, abre no **Google Maps** e no **Google Earth**.
 - Paleta de comandos (**Ctrl+K**), desfazer/refazer, recuperação automática.
 - Exporta diagrama em PDF/SVG/PS, relatório PDF completo e CSV para o Excel.
 

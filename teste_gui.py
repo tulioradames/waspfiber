@@ -9,6 +9,10 @@ import tkinter.simpledialog as sd
 import tempfile
 import webbrowser
 
+# configuracao do programa (autosave, cache do mapa) numa
+# pasta descartavel: o teste nao mexe no que a pessoa usa de verdade
+os.environ["APPDATA"] = tempfile.mkdtemp(prefix="waspfiber_appdata_")
+
 import waspfiber as fttx
 from waspfiber import App
 
@@ -550,6 +554,37 @@ app.acao_google_maps()
 mb.askyesno = lambda *a, **k: True
 checar(not abertos, "sem coordenada nao abre o navegador")
 checar(app.botao_local.cget("text") == "Definir localizacao", "rede nova pede pra definir o local")
+
+print("== mapa mais rapido (B0.35) ==")
+res2 = {}
+
+
+def dialogo_rapido():
+    d = dialogos[-1]
+    res2["radios"] = [w.cget("text") for w in d.quadro_fontes.winfo_children()]
+    for _ in range(30):
+        d.update()
+        __import__("time").sleep(0.02)
+    d.mapa._roda(__import__("types").SimpleNamespace(x=340, y=250, delta=120))
+    chave = next(k for k in list(d.mapa._imagens) if k[1] == d.mapa.zoom - 1)
+    filho = (chave[0], chave[1] + 1, chave[2] * 2, chave[3] * 2)
+    d.mapa._imagens.pop(filho, None)
+    previa = d.mapa._previa(filho)
+    res2["previa"] = previa is not None and previa.width() == 256
+    d.var_fonte.set("satelite")
+    d._escolher_fonte()
+    res2["config_fonte"] = fttx.mapa.ler_config().get("fonte")
+    d.cancel()
+
+
+app.after(50, dialogo_rapido)
+app.acao_local()
+app.update()
+checar(res2.get("radios") == ["Mapa", "Satelite"], "opcoes do mapa: Mapa e Satelite", res2.get("radios"))
+checar(res2.get("previa"), "mostra a previa ampliada enquanto o tile carrega")
+checar(res2.get("config_fonte") == "satelite", "lembra a escolha de fonte")
+checar(not any("Chave do Google" in r[1] for r in app.resultados_paleta("chave")),
+       "paleta sem chave do Google")
 
 print("== rede vazia ==")
 app.rede = fttx.Rede()

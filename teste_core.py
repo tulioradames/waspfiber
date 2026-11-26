@@ -2,6 +2,10 @@
 sem abrir janela nenhuma.  Rodar:  python teste_core.py"""
 import os
 import tempfile
+
+# configuracao do programa (autosave, cache do mapa) numa
+# pasta descartavel: o teste nao mexe no que a pessoa usa de verdade
+os.environ["APPDATA"] = tempfile.mkdtemp(prefix="waspfiber_appdata_")
 import time
 from waspfiber import *
 import waspfiber_mapa as mapa
@@ -440,6 +444,16 @@ mapa.gravar_ultima_vista(-10.0, -40.0, 12, pasta=vista_pasta)
 checar(mapa.ler_ultima_vista(pasta=vista_pasta) == (-10.0, -40.0, 12), "mapa lembra a ultima vista")
 checar(mapa.ler_ultima_vista(pasta=os.path.join(PASTA_TESTE, "nada")) == mapa.VISTA_PADRAO,
        "sem vista guardada abre no Brasil")
+
+print("== fontes do mapa (B0.35) ==")
+checar(mapa.fontes_disponiveis() == ("mapa", "satelite"), "fontes: mapa e satelite, sem chave")
+checar(mapa.fonte_inicial() == "mapa", "abre no mapa de ruas")
+mapa.gravar_config({"fonte": "satelite"})
+checar(mapa.fonte_inicial() == "satelite", "lembra a fonte escolhida")
+mapa.gravar_config({"fonte": "google_hibrido"})
+checar(mapa.fonte_inicial() == "mapa", "fonte desconhecida (versao antiga) volta pro mapa")
+checar(not hasattr(mapa, "chave_google") and not hasattr(mapa, "URL_GOOGLE"),
+       "sem integracao com a API do Google")
 
 print("== limites ==")
 montar_cena(Rede())
