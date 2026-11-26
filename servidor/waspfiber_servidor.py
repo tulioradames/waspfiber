@@ -48,9 +48,10 @@ import tarfile
 import threading
 import time
 import unicodedata
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSAO_SERVIDOR = "B0.40"
+VERSAO_SERVIDOR = "B0.41"
 EXTENSAO = ".wasp.json"
 MAX_CORPO = 25 * 1024 * 1024
 DIAS_SESSAO = 30
@@ -146,19 +147,120 @@ class Armazem:
             raise ErroApi(404, "Empresa nao encontrada.")
         return dados
 
-    def definir_usuario(self, empresa_id, login, nome, senha, papel="usuario"):
+    # ---------------- dominio de e-mail da empresa (B0.41) ----------------
+    def _empresas(self):
+        base = os.path.join(self.pasta, "empresas")
+        for eid in sorted(os.listdir(base)) if os.path.isdir(base) else []:
+            dados = _ler_json(os.path.join(base, eid, "empresa.json"))
+            if dados:
+                yield eid, dados
+
+    def definir_dominio(self, empresa_id, dominio):
+        """O e-mail @dominio identifica a empresa no login e no 'criar conta'."""
+        dominio = (dominio or "").strip().lower().lstrip("@")
+        if not re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", dominio):
+            raise ValueError("Dominio invalido: %s" % dominio)
+        with self.trava:
+            for eid, dados in self._empresas():
+                if eid != empresa_id and dominio in (dados.get("dominios") or []):
+                    raise ValueError("O dominio %s ja e da empresa '%s'." % (dominio, eid))
+            dados = self.empresa(empresa_id)
+            dados["dominios"] = sorted(set((dados.get("dominios") or []) + [dominio]))
+            _gravar_json(os.path.join(self._p_empresa(empresa_id), "empresa.json"), dados)
+        return dados["dominios"]
+
+    def empresa_do_email(self, email):
+        """(empresa_id, dados) pelo dominio do e-mail, ou (None, None)."""
+        email = (email or "").strip().lower()
+        if "@" not in email:
+            return None, None
+        dominio = email.rsplit("@", 1)[1]
+        for eid, dados in self._empresas():
+            if dominio in (dados.get("dominios") or []):
+                return eid, dados
+        return None, None
+
+    # ---------------- usuarios ----------------
+    def definir_usuario(self, empresa_id, login, nome, senha, papel="usuario", status="ativo"):
         self.empresa(empresa_id)
         login = (login or "").strip().lower()
-        if not re.fullmatch(r"[a-z0-9._-]{2,40}", login):
-            raise ValueError("Login invalido (use letras, numeros, ponto, - ou _).")
+        if not re.fullmatch(r"[a-z0-9._%+@-]{2,80}", login):
+            raise ValueError("Login invalido (use o e-mail, ou letras, numeros, ponto, - ou _).")
         if len(senha or "") < 8:
             raise ValueError("A senha precisa ter pelo menos 8 caracteres.")
         caminho = os.path.join(self._p_empresa(empresa_id), "usuarios.json")
         with self.trava:
             usuarios = _ler_json(caminho, {}) or {}
             sal, h = hash_senha(senha)
-            usuarios[login] = {"nome": nome or login, "sal": sal, "hash": h, "papel": papel}
+            usuarios[login] = {"nome": nome or login, "sal": sal, "hash": h, "papel": papel,
+                               "status": status, "criado_em": time.strftime("%Y-%m-%d %H:%M:%S")}
             _gravar_json(caminho, usuarios)
+
+    def _usuarios(self, empresa_id):
+        return _ler_json(os.path.join(self._p_empresa(empresa_id), "usuarios.json"), {}) or {}
+
+    def renomear_usuario(self, empresa_id, antigo, novo):
+        """Troca o login (ex.: 'tulio' -> 'tulio@empresa.com.br'), mantendo a senha."""
+        antigo, novo = antigo.strip().lower(), novo.strip().lower()
+        caminho = os.path.join(self._p_empresa(empresa_id), "usuarios.json")
+        with self.trava:
+            usuarios = self._usuarios(empresa_id)
+            if antigo not in usuarios:
+                raise ValueError("Usuario '%s' nao existe." % antigo)
+            if novo in usuarios:
+                raise ValueError("Ja existe o usuario '%s'." % novo)
+            usuarios[novo] = usuarios.pop(antigo)
+            _gravar_json(caminho, usuarios)
+
+    def criar_conta(self, nome, email, senha):
+        """'Criar conta' do programa: so com e-mail do dominio de uma empresa.
+        A conta nasce PENDENTE: o administrador da empresa aprova no programa."""
+        nome, email = (nome or "").strip(), (email or "").strip().lower()
+        if not re.fullmatch(r"[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)+", email):
+            raise ErroApi(400, "E-mail invalido.")
+        if len(nome) < 2:
+            raise ErroApi(400, "Informe o seu nome.")
+        if len(senha or "") < 8:
+            raise ErroApi(400, "A senha precisa ter pelo menos 8 caracteres.")
+        empresa_id, empresa = self.empresa_do_email(email)
+        if not empresa_id:
+            raise ErroApi(400, "O dominio @%s nao e de nenhuma empresa cadastrada no WaspFiber. "
+                               "Use o e-mail da empresa." % email.rsplit("@", 1)[1])
+        with self.trava:
+            usuarios = self._usuarios(empresa_id)
+            if email in usuarios:
+                raise ErroApi(409, "Ja existe uma conta com esse e-mail. Use 'Entrar'.")
+            if len([u for u in usuarios.values() if u.get("status") == "pendente"]) >= 50:
+                raise ErroApi(429, "Muitos pedidos de acesso aguardando aprovacao nessa empresa.")
+            self.definir_usuario(empresa_id, email, nome, senha, "usuario", "pendente")
+        return {"empresa_nome": empresa["nome"], "status": "pendente"}
+
+    def pedidos(self, empresa_id):
+        return sorted(({"email": login, "nome": u.get("nome", ""), "criado_em": u.get("criado_em", "")}
+                       for login, u in self._usuarios(empresa_id).items()
+                       if u.get("status") == "pendente"), key=lambda p: p["criado_em"])
+
+    def decidir_pedido(self, empresa_id, email, aprovar):
+        email = (email or "").strip().lower()
+        caminho = os.path.join(self._p_empresa(empresa_id), "usuarios.json")
+        with self.trava:
+            usuarios = self._usuarios(empresa_id)
+            conta = usuarios.get(email)
+            if not conta or conta.get("status") != "pendente":
+                raise ErroApi(404, "Pedido de acesso nao encontrado.")
+            if aprovar:
+                conta["status"] = "ativo"
+            else:
+                del usuarios[email]
+            _gravar_json(caminho, usuarios)
+        return {"ok": True}
+
+    def entrar_email(self, email, senha):
+        empresa_id, _ = self.empresa_do_email(email)
+        if not empresa_id:
+            time.sleep(1.0)
+            raise ErroApi(401, "E-mail ou senha incorretos.")
+        return self.entrar(empresa_id, email, senha)
 
     def _bloqueado(self, chave):
         """Minutos que faltam pra liberar o login (0 = liberado)."""
@@ -192,16 +294,21 @@ class Armazem:
             with self.trava:
                 self.erros_login.setdefault(chave, []).append(time.time())
             time.sleep(1.0)          # freia tentativa de adivinhar senha
-            raise ErroApi(401, "Empresa, usuario ou senha incorretos.")
+            raise ErroApi(401, "E-mail ou senha incorretos." if "@" in login
+                          else "Empresa, usuario ou senha incorretos.")
         with self.trava:
             self.erros_login.pop(chave, None)
+        if conta.get("status") == "pendente":
+            raise ErroApi(403, "Sua conta ainda aguarda a aprovacao do administrador da %s."
+                          % empresa["nome"])
+        papel = conta.get("papel", "usuario")
         token = secrets.token_urlsafe(32)
         with self.trava:
             self._limpar_sessoes()
-            self.sessoes[token] = {"empresa": empresa_id, "usuario": login,
+            self.sessoes[token] = {"empresa": empresa_id, "usuario": login, "papel": papel,
                                    "nome": conta["nome"], "expira": time.time() + DIAS_SESSAO * 86400}
             _gravar_json(os.path.join(self.pasta, "sessoes.json"), self.sessoes)
-        return {"token": token, "usuario": login, "nome": conta["nome"],
+        return {"token": token, "usuario": login, "nome": conta["nome"], "papel": papel,
                 "empresa": empresa_id, "empresa_nome": empresa["nome"]}
 
     def sair(self, token):
@@ -452,8 +559,21 @@ class Manipulador(BaseHTTPRequestHandler):
                                              "versao": VERSAO_SERVIDOR})
             if rota == ["entrar"] and metodo == "POST":
                 d = self._corpo()
+                if d.get("email"):
+                    return self._responder(200, a.entrar_email(d.get("email"), d.get("senha")))
                 return self._responder(200, a.entrar(d.get("empresa"), d.get("usuario"),
                                                      d.get("senha")))
+            if rota == ["empresa-do-email"] and metodo == "GET":
+                consulta = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                eid, dados = a.empresa_do_email((consulta.get("email") or [""])[0])
+                if not eid:
+                    raise ErroApi(404, "Dominio nao cadastrado.")
+                return self._responder(200, {"empresa_nome": dados["nome"]})
+            if rota == ["contas"] and metodo == "POST":
+                d = self._corpo()
+                time.sleep(0.5)          # freia cadastro em massa
+                return self._responder(201, a.criar_conta(d.get("nome"), d.get("email"),
+                                                          d.get("senha")))
             token, s = self._sessao()
             emp, por = s["empresa"], s["nome"]
             if rota == ["sair"] and metodo == "POST":
@@ -461,8 +581,17 @@ class Manipulador(BaseHTTPRequestHandler):
                 return self._responder(200, {"ok": True})
             if rota == ["eu"] and metodo == "GET":
                 return self._responder(200, {"usuario": s["usuario"], "nome": s["nome"],
-                                             "empresa": emp,
+                                             "papel": s.get("papel", "usuario"), "empresa": emp,
                                              "empresa_nome": a.empresa(emp)["nome"]})
+            if rota[:1] == ["pedidos"]:
+                if s.get("papel") != "admin":
+                    raise ErroApi(403, "So o administrador da empresa aprova pedidos de acesso.")
+                if rota == ["pedidos"] and metodo == "GET":
+                    return self._responder(200, {"pedidos": a.pedidos(emp)})
+                if len(rota) == 2 and rota[1] in ("aprovar", "recusar") and metodo == "POST":
+                    d = self._corpo()
+                    return self._responder(200, a.decidir_pedido(emp, d.get("email"),
+                                                                 rota[1] == "aprovar"))
             if rota == ["cidades"]:
                 if metodo == "GET":
                     return self._responder(200, {"cidades": a.listar_cidades(emp)})
@@ -514,7 +643,8 @@ def criar_servidor(pasta_dados, endereco="0.0.0.0", porta=8765):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Servidor WaspFiber")
     sub = ap.add_subparsers(dest="comando", required=True)
-    for nome in ("servir", "criar-empresa", "criar-usuario", "listar", "backup"):
+    for nome in ("servir", "criar-empresa", "criar-usuario", "listar", "backup",
+                 "definir-dominio", "renomear-usuario"):
         p = sub.add_parser(nome)
         p.add_argument("--dados", default="~/waspfiber-dados")
         if nome in ("servir", "backup"):
@@ -530,6 +660,13 @@ def main(argv=None):
             p.add_argument("login")
             p.add_argument("nome")
             p.add_argument("--admin", action="store_true")
+        if nome == "definir-dominio":
+            p.add_argument("empresa")
+            p.add_argument("dominio")
+        if nome == "renomear-usuario":
+            p.add_argument("empresa")
+            p.add_argument("antigo")
+            p.add_argument("novo")
     args = ap.parse_args(argv)
     armazem = Armazem(args.dados)
     if args.comando == "servir":
@@ -551,14 +688,21 @@ def main(argv=None):
         armazem.definir_usuario(args.empresa, args.login, args.nome, senha,
                                 "admin" if args.admin else "usuario")
         print("Usuario '%s' pronto na empresa '%s'." % (args.login, args.empresa))
+    elif args.comando == "definir-dominio":
+        print("Dominios da empresa '%s': %s" % (
+            args.empresa, ", ".join(armazem.definir_dominio(args.empresa, args.dominio))))
+    elif args.comando == "renomear-usuario":
+        armazem.renomear_usuario(args.empresa, args.antigo, args.novo)
+        print("Usuario '%s' agora e '%s'." % (args.antigo, args.novo))
     elif args.comando == "listar":
-        base = os.path.join(armazem.pasta, "empresas")
-        for emp in sorted(os.listdir(base)):
-            dados = _ler_json(os.path.join(base, emp, "empresa.json"), {})
-            usuarios = _ler_json(os.path.join(base, emp, "usuarios.json"), {}) or {}
-            print("%s  (%s)  usuarios: %s  cidades: %d" % (
-                emp, dados.get("nome", ""), ", ".join(sorted(usuarios)) or "-",
+        for emp, dados in armazem._empresas():
+            usuarios = armazem._usuarios(emp)
+            print("%s  (%s)  dominios: %s  cidades: %d" % (
+                emp, dados.get("nome", ""), ", ".join(dados.get("dominios") or []) or "-",
                 len(armazem.listar_cidades(emp))))
+            for login, u in sorted(usuarios.items()):
+                print("    %-40s %-8s %s" % (login, u.get("papel", "usuario"),
+                                             u.get("status", "ativo")))
 
 
 if __name__ == "__main__":

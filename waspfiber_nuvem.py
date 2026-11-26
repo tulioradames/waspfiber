@@ -20,8 +20,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-# endereco publico (Tailscale Funnel, HTTPS) - funciona dentro e fora da empresa (B0.40)
-SERVIDOR_PADRAO = "https://servidor.taild43fdd.ts.net"
+# endereco do servidor: fixo, a pessoa nao escolhe (B0.41). E o publico (Tailscale
+# Funnel, HTTPS), que funciona dentro e fora da empresa. WASPFIBER_SERVIDOR troca
+# o endereco so pra testes / instalacao propria.
+SERVIDOR_PADRAO = os.environ.get("WASPFIBER_SERVIDOR") or "https://servidor.taild43fdd.ts.net"
+CAMPOS_INFO = ("usuario", "nome", "empresa", "empresa_nome", "papel")
 UFS = ("AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA",
        "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO")
 TEMPO_LIMITE = 15
@@ -121,18 +124,29 @@ class Conexao:
         c = cls(url)
         r = c.pedir("POST", "/api/entrar", {"empresa": empresa, "usuario": usuario, "senha": senha})
         c.token = r["token"]
-        c.info = {k: r.get(k, "") for k in ("usuario", "nome", "empresa", "empresa_nome")}
-        gravar_sessao(dict(c.info, url=c.url, token=c.token))
+        c.info = {k: r.get(k, "") for k in CAMPOS_INFO}
+        gravar_sessao(dict(ler_sessao(), **dict(c.info, url=c.url, token=c.token)))
+        return c
+
+    @classmethod
+    def entrar_email(cls, email, senha, url=None):
+        """Login do programa (B0.41): e-mail + senha; a empresa sai do dominio."""
+        c = cls(url or SERVIDOR_PADRAO)
+        r = c.pedir("POST", "/api/entrar", {"email": (email or "").strip(), "senha": senha})
+        c.token = r["token"]
+        c.info = {k: r.get(k, "") for k in CAMPOS_INFO}
+        gravar_sessao(dict(ler_sessao(), **dict(c.info, url=c.url, token=c.token,
+                                                 email=(email or "").strip().lower())))
         return c
 
     @classmethod
     def da_sessao_salva(cls):
         """A conexao da ultima vez (sem conferir no servidor), ou None."""
         s = ler_sessao()
-        if not (s.get("url") and s.get("token")):
+        if not s.get("token"):
             return None
-        return cls(s["url"], s["token"], {k: s.get(k, "") for k in
-                                          ("usuario", "nome", "empresa", "empresa_nome")})
+        # o endereco e sempre o padrao (o campo do servidor saiu do login)
+        return cls(SERVIDOR_PADRAO, s["token"], {k: s.get(k, "") for k in CAMPOS_INFO})
 
     def sair(self):
         try:
@@ -148,11 +162,40 @@ class Conexao:
     def conferir(self):
         """Confere a sessao no servidor (atualiza nome/empresa)."""
         r = self.pedir("GET", "/api/eu")
-        self.info.update({k: r.get(k, "") for k in ("usuario", "nome", "empresa", "empresa_nome")})
+        self.info.update({k: r.get(k, "") for k in CAMPOS_INFO})
         return r
 
     def saude(self):
         return self.pedir("GET", "/api/saude")
+
+    # ---------------- contas (B0.41) ----------------
+    @classmethod
+    def empresa_do_email(cls, email, url=None):
+        """Nome da empresa do dominio do e-mail, ou None se nao cadastrado.
+        Lanca ErroServidor se nao houver conexao."""
+        email = (email or "").strip()
+        if "@" not in email or "." not in email.rsplit("@", 1)[1]:
+            return None
+        try:
+            r = cls(url or SERVIDOR_PADRAO).pedir(
+                "GET", "/api/empresa-do-email?" + urllib.parse.urlencode({"email": email}))
+            return r.get("empresa_nome")
+        except ErroServidor as erro:
+            if erro.status == 404:
+                return None
+            raise
+
+    @classmethod
+    def criar_conta(cls, nome, email, senha, url=None):
+        return cls(url or SERVIDOR_PADRAO).pedir(
+            "POST", "/api/contas", {"nome": nome, "email": email, "senha": senha})
+
+    def pedidos(self):
+        return self.pedir("GET", "/api/pedidos")["pedidos"]
+
+    def decidir_pedido(self, email, aprovar):
+        return self.pedir("POST", "/api/pedidos/%s" % ("aprovar" if aprovar else "recusar"),
+                          {"email": email})
 
     # ---------------- cidades e diagramas ----------------
     def cidades(self):

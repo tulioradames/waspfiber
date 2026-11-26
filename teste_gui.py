@@ -48,8 +48,12 @@ srv = ws.criar_servidor(_dados_srv, "127.0.0.1", 0)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 URL_SRV = "http://127.0.0.1:%d" % srv.server_address[1]
 srv.RequestHandlerClass.armazem.criar_empresa("junior", "Junior Telecom")
-srv.RequestHandlerClass.armazem.definir_usuario("junior", "tulio", "Tulio", "senha-teste-123")
-srv.RequestHandlerClass.armazem.definir_usuario("junior", "ana", "Ana", "senha-teste-456")
+srv.RequestHandlerClass.armazem.definir_dominio("junior", "junior.com.br")
+srv.RequestHandlerClass.armazem.definir_usuario("junior", "tulio@junior.com.br", "Tulio",
+                                                "senha-teste-123", "admin")
+srv.RequestHandlerClass.armazem.definir_usuario("junior", "ana@junior.com.br", "Ana",
+                                                "senha-teste-456")
+fttx.nuvem.SERVIDOR_PADRAO = URL_SRV      # o endereco e fixo no programa; no teste, o local
 
 app = App()
 app.update()
@@ -619,20 +623,45 @@ app.mostrar_inicio()
 app.update()
 tela = app.tela_inicio
 checar(tela.visivel() and tela.login.winfo_ismapped(), "sem login: mostra o login")
-campos = tela.form["campos"]
-for chave, valor in (("url", URL_SRV), ("empresa", "junior"), ("usuario", "tulio"),
-                     ("senha", "errada")):
-    campos[chave].delete(0, "end")
-    campos[chave].insert(0, valor)
-tela.form["enviar"]()
+form = tela.form
+
+
+def esperar_empresa(texto_esperado, limite=4.0):
+    fim = __import__("time").time() + limite
+    while __import__("time").time() < fim:
+        app.update()
+        if texto_esperado in form.lbl_empresa.cget("text"):
+            return True
+        __import__("time").sleep(0.03)
+    return False
+
+
+checar(form.modo == "entrar" and set(form.campos) == {"email", "senha"}
+       and "Entrar no WaspFiber" in form.lbl_titulo.cget("text"),
+       "tela 'Entrar no WaspFiber' so com e-mail e senha (sem servidor, sem empresa)")
+form.campos["email"].delete(0, "end")
+form.campos["email"].insert(0, "tulio@junior.com.br")
+form._agendar_empresa(0)
+checar(esperar_empresa("Junior Telecom"), "empresa aparece sozinha pelo dominio do e-mail",
+       form.lbl_empresa.cget("text"))
+form.campos["email"].delete(0, "end")
+form.campos["email"].insert(0, "tulio@gmail.com")
+form._agendar_empresa(0)
+checar(esperar_empresa("nao e de nenhuma empresa"), "dominio desconhecido: avisa",
+       form.lbl_empresa.cget("text"))
+form.campos["email"].delete(0, "end")
+form.campos["email"].insert(0, "tulio@junior.com.br")
+form.campos["senha"].insert(0, "errada")
+form.enviar()
 app.update()
-checar(app.conexao is None and "incorretos" in tela.form["erro"].cget("text"),
-       "senha errada: mensagem no login", tela.form["erro"].cget("text"))
-campos["senha"].insert(0, "senha-teste-123")
-tela.form["enviar"]()
+checar(app.conexao is None and "incorretos" in form.msg.cget("text"),
+       "senha errada: mensagem no login", form.msg.cget("text"))
+form.campos["senha"].insert(0, "senha-teste-123")
+form.enviar()
 app.update()
-checar(app.conexao is not None and not tela.login.winfo_ismapped() and campos["senha"].get() == "",
+checar(app.conexao is not None and not tela.login.winfo_ismapped() and form.campos["senha"].get() == "",
        "login certo: entra e limpa a senha")
+checar(nuvem.ler_sessao().get("email") == "tulio@junior.com.br", "lembra o e-mail pro proximo login")
 checar("Junior Telecom" in tela.lbl_empresa.cget("text"), "mostra a empresa e o usuario",
        tela.lbl_empresa.cget("text"))
 checar(tela.aviso.winfo_ismapped() and "cidade" in tela.aviso_titulo.cget("text"),
@@ -675,7 +704,7 @@ checar("Santos - SP" in app.lbl_arquivo.cget("text") and "CTO Rua A 01" in app.l
 app.rede.add_equipamento("DIO X", fttx.TIPO_DIO, 12)
 app._marcar_alterado()
 checar(app.acao_salvar() and not app.alteracoes_pendentes, "salvar grava no servidor")
-outra = nuvem.Conexao.entrar(URL_SRV, "junior", "ana", "senha-teste-456")
+outra = nuvem.Conexao.entrar_email("ana@junior.com.br", "senha-teste-456")
 nuvem.gravar_sessao(dict(app.conexao.info, url=app.conexao.url, token=app.conexao.token))
 checar(len(outra.abrir("santos-sp", did)["conteudo"]["equipamentos"]) == 1,
        "outra pessoa ve o que foi salvo")
@@ -741,10 +770,59 @@ checar(not tela.visivel(), "alteracao nao salva: cancelar fica no editor")
 mb.askyesnocancel = lambda *a, **k: False
 app.mostrar_inicio()
 checar(tela.visivel(), "descartar volta pro inicio")
+print("== criar conta e pedidos de acesso (B0.41) ==")
+checar(tela.bt_pedidos.winfo_ismapped() and tela.bt_pedidos.cget("text") == "Pedidos de acesso",
+       "administrador ve o botao de pedidos de acesso")
 tela.sair()
 app.update()
 checar(app.conexao is None and tela.login.winfo_ismapped() and "token" not in nuvem.ler_sessao(),
        "sair volta pro login e esquece a sessao")
+form.trocar_modo()
+checar(form.modo == "criar" and set(form.campos) == {"nome", "email", "senha", "senha2"},
+       "criar conta: nome, e-mail e senha (2x)")
+for k, v in (("nome", "Bruno"), ("email", "bruno@gmail.com"), ("senha", "senha-bruno-1"),
+             ("senha2", "senha-bruno-1")):
+    form.campos[k].delete(0, "end")
+    form.campos[k].insert(0, v)
+form.enviar()
+checar("nao e de nenhuma empresa" in form.msg.cget("text"), "so aceita e-mail do dominio da empresa",
+       form.msg.cget("text"))
+form.campos["email"].delete(0, "end")
+form.campos["email"].insert(0, "bruno@junior.com.br")
+form.campos["senha2"].delete(0, "end")
+form.campos["senha2"].insert(0, "outra-coisa")
+form.enviar()
+checar("nao conferem" in form.msg.cget("text"), "senhas diferentes: avisa")
+form.campos["senha2"].insert(0, "senha-bruno-1")
+form.enviar()
+app.update()
+checar(form.modo == "entrar" and "Pedido enviado" in form.msg.cget("text")
+       and "Junior Telecom" in form.msg.cget("text"), "pedido enviado e volta pro Entrar",
+       form.msg.cget("text"))
+form.campos["email"].delete(0, "end")
+form.campos["email"].insert(0, "bruno@junior.com.br")
+form.campos["senha"].insert(0, "senha-bruno-1")
+form.enviar()
+checar(app.conexao is None and "aguarda a aprovacao" in form.msg.cget("text"),
+       "conta pendente nao entra ate aprovar", form.msg.cget("text"))
+form.campos["senha"].insert(0, "senha-teste-123")
+form.campos["email"].delete(0, "end")
+form.campos["email"].insert(0, "tulio@junior.com.br")
+form.enviar()
+app.update()
+checar(tela.bt_pedidos.cget("text") == "Pedidos de acesso (1)", "admin ve 1 pedido aguardando",
+       tela.bt_pedidos.cget("text"))
+janela = fttx.DialogPedidos(app)
+app.update()
+janela.decidir("bruno@junior.com.br", True)
+app.update()
+janela.destroy()
+checar(tela.bt_pedidos.cget("text") == "Pedidos de acesso", "aprovado: some da lista")
+checar(nuvem.Conexao.entrar_email("bruno@junior.com.br", "senha-bruno-1").info["nome"] == "Bruno",
+       "depois de aprovado, entra")
+nuvem.gravar_sessao(dict(app.conexao.info, url=app.conexao.url, token=app.conexao.token))
+tela.sair()
+app.update()
 app.acao_exemplo()
 app.update()
 

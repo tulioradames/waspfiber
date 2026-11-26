@@ -31,7 +31,7 @@ import waspfiber_mapa as mapa   # localizacao do diagrama (B0.34)
 import waspfiber_nuvem as nuvem   # servidor: login, cidades e diagramas (B0.39)
 
 APP_NOME = "WaspFiber"
-VERSAO = "B0.40"
+VERSAO = "B0.41"
 EXTENSAO = ".wasp.json"
 EXTENSAO_NIX = ".nix.json"      # redes salvas quando o programa se chamava Nix
 
@@ -4421,50 +4421,207 @@ class DialogNovaCidade(DialogoBase):
         self.resultado = (self.e_nome.get().strip(), self.var_uf.get().strip())
 
 
-def montar_form_login(pai, tema, fonte, ao_entrar, sessao_anterior=None):
-    """Campos de login (servidor, empresa, usuario, senha). Devolve um dict
-    com os campos, o rotulo de erro e a funcao enviar()."""
-    s = sessao_anterior or {}
-    fundo = pai.cget("bg")
-    campos = {}
-    for chave, rotulo, valor, oculto in (
-            ("url", "Servidor", s.get("url") or nuvem.SERVIDOR_PADRAO, False),
-            ("empresa", "Empresa", s.get("empresa", ""), False),
-            ("usuario", "Usuario", s.get("usuario", ""), False),
-            ("senha", "Senha", "", True)):
-        tk.Label(pai, text=rotulo, bg=fundo, fg=tema["ui_texto_fraco"],
-                 font=(fonte, 8)).pack(anchor="w", pady=(8, 2))
-        entrada = ttk.Entry(pai, width=38, show="•" if oculto else "")
+class PainelAcesso(tk.Frame):
+    """Entrar no WaspFiber (B0.41): e-mail e senha - o servidor e fixo e a
+    EMPRESA SAI DO DOMINIO do e-mail (aparece sozinha, sem campo pra errar).
+    Tambem 'Criar conta': so com e-mail do dominio da empresa; a conta fica
+    aguardando o administrador da empresa aprovar.
+
+    modo_unico=True: so o 'Entrar' (sessao vencida no meio do trabalho)."""
+
+    def __init__(self, pai, tema, fonte, fonte_titulo, ao_entrar, modo_unico=False):
+        super().__init__(pai, bg=pai.cget("bg"))
+        self.tema, self.fonte, self.fonte_titulo = tema, fonte, fonte_titulo
+        self.ao_entrar, self.modo_unico = ao_entrar, modo_unico
+        self.modo = "entrar"
+        self._consulta = None            # after() da busca da empresa
+        self._email_consultado = None
+        self.campos = {}
+        fundo = self.cget("bg")
+        self.lbl_titulo = tk.Label(self, text="", bg=fundo, fg=tema["ui_texto"],
+                                   font=(fonte_titulo, 14))
+        self.lbl_titulo.pack()
+        self.lbl_sub = tk.Label(self, text="", bg=fundo, fg=tema["ui_texto_fraco"],
+                                font=(fonte, 9))
+        self.lbl_sub.pack(pady=(2, 4))
+        self.corpo = tk.Frame(self, bg=fundo)
+        self.corpo.pack(fill="x")
+        self.msg = tk.Label(self, text="", bg=fundo, fg=tema["ui_erro"], font=(fonte, 8),
+                            wraplength=300, justify="left")
+        self.msg.pack(anchor="w", pady=(8, 0))
+        # nasce com texto: sem texto o BotaoIcone vira botao "so icone" (tamanho fixo)
+        self.botao = nix_ui.BotaoIcone(self, tema, None, texto="Entrar", variante="acento",
+                                       comando=self.enviar)
+        self.botao.pack(fill="x", pady=(10, 0))
+        self.troca = tk.Frame(self, bg=fundo)
+        if not modo_unico:
+            self.troca.pack(pady=(12, 0))
+        self.lbl_troca = tk.Label(self.troca, text="", bg=fundo, fg=tema["ui_texto_fraco"],
+                                  font=(fonte, 9))
+        self.lbl_troca.pack(side="left")
+        self.link_troca = tk.Label(self.troca, text="", bg=fundo, fg=tema["ui_acento"],
+                                   font=(fonte, 9, "underline"), cursor="hand2")
+        self.link_troca.pack(side="left", padx=(4, 0))
+        self.link_troca.bind("<ButtonRelease-1>", lambda _e: self.trocar_modo())
+        self.montar("entrar")
+
+    # ---------------- montagem ----------------
+    def _campo(self, chave, rotulo, valor="", oculto=False):
+        t = self.tema
+        tk.Label(self.corpo, text=rotulo, bg=self.cget("bg"), fg=t["ui_texto_fraco"],
+                 font=(self.fonte, 8)).pack(anchor="w", pady=(8, 2))
+        entrada = ttk.Entry(self.corpo, width=38, show="•" if oculto else "")
         entrada.insert(0, valor)
         entrada.pack(fill="x")
-        campos[chave] = entrada
-    erro = tk.Label(pai, text="", bg=fundo, fg=tema["ui_erro"], font=(fonte, 8),
-                    wraplength=300, justify="left")
-    erro.pack(anchor="w", pady=(8, 0))
+        entrada.bind("<Return>", lambda _e: (self.enviar(), "break")[1])
+        self.campos[chave] = entrada
+        return entrada
 
-    def enviar(_evento=None):
-        dados = {k: e.get().strip() if k != "senha" else e.get() for k, e in campos.items()}
-        if not all(dados.values()):
-            erro.configure(text="Preencha servidor, empresa, usuario e senha.")
-            return "break"
-        erro.configure(text="Entrando...")
-        pai.update_idletasks()
+    def montar(self, modo):
+        t = self.tema
+        self.modo = modo
+        email_antes = self.campos["email"].get() if "email" in self.campos else \
+            nuvem.ler_sessao().get("email", "")
+        for filho in self.corpo.winfo_children():
+            filho.destroy()
+        self.campos = {}
+        self._email_consultado = None
+        if modo == "entrar":
+            self.lbl_titulo.configure(text="Entrar no WaspFiber")
+            self.lbl_sub.configure(text="Use o e-mail da sua empresa.")
+            self._campo("email", "E-mail", email_antes)
+            self._linha_empresa()
+            self._campo("senha", "Senha", oculto=True)
+            self.botao.configure(text="Entrar")
+            self.lbl_troca.configure(text="Ainda nao tem conta?")
+            self.link_troca.configure(text="Criar conta")
+        else:
+            self.lbl_titulo.configure(text="Criar conta")
+            self.lbl_sub.configure(text="Com o e-mail da sua empresa (ex.: voce@suaempresa.com.br).")
+            self._campo("nome", "Seu nome")
+            self._campo("email", "E-mail da empresa", email_antes)
+            self._linha_empresa()
+            self._campo("senha", "Senha (pelo menos 8 caracteres)", oculto=True)
+            self._campo("senha2", "Repita a senha", oculto=True)
+            self.botao.configure(text="Criar conta")
+            self.lbl_troca.configure(text="Ja tem conta?")
+            self.link_troca.configure(text="Entrar")
+        self.campos["email"].bind("<KeyRelease>", lambda _e: self._agendar_empresa(), add="+")
+        self.campos["email"].bind("<FocusOut>", lambda _e: self._agendar_empresa(0), add="+")
+        self.mostrar_msg("")
+        self._agendar_empresa(0)
+        self.foco = next((e for e in self.campos.values() if not e.get()), self.campos["senha"])
+
+    def _linha_empresa(self):
+        """'Empresa: Zaaz NE' - preenchida sozinha pelo dominio do e-mail."""
+        fundo = self.cget("bg")
+        linha = tk.Frame(self.corpo, bg=fundo)
+        linha.pack(fill="x", pady=(6, 0))
+        self.img_empresa = tk.Label(linha, image=nix_ui.icone("building-2", "fraco"), bg=fundo)
+        self.img_empresa.pack(side="left")
+        self.lbl_empresa = tk.Label(linha, text="", bg=fundo, fg=self.tema["ui_texto_fraco"],
+                                    font=(self.fonte, 9))
+        self.lbl_empresa.pack(side="left", padx=(6, 0))
+        self.empresa_nome = None
+
+    def trocar_modo(self):
+        self.montar("criar" if self.modo == "entrar" else "entrar")
+        self.after(50, lambda: self.foco.focus_set())
+
+    def mostrar_msg(self, texto, tipo="erro"):
+        cor = {"erro": self.tema["ui_erro"], "ok": self.tema["ui_ok"],
+               "info": self.tema["ui_texto_fraco"]}[tipo]
+        self.msg.configure(text=texto, fg=cor)
+
+    # ---------------- empresa pelo dominio ----------------
+    def _agendar_empresa(self, atraso=450):
+        if self._consulta:
+            self.after_cancel(self._consulta)
+        self._consulta = self.after(atraso, self._buscar_empresa)
+
+    def _buscar_empresa(self):
+        self._consulta = None
+        if "email" not in self.campos:
+            return
+        email = self.campos["email"].get().strip().lower()
+        if email == self._email_consultado:
+            return
+        self._email_consultado = email
+        t = self.tema
+        if "@" not in email or "." not in email.rsplit("@", 1)[1]:
+            self.empresa_nome = None
+            self.lbl_empresa.configure(text="A empresa aparece aqui pelo e-mail", fg=t["ui_texto_fraco"])
+            self.img_empresa.configure(image=nix_ui.icone("building-2", "fraco"))
+            return
+        self.lbl_empresa.configure(text="Procurando a empresa...", fg=t["ui_texto_fraco"])
+
+        def pronto(nome, erro):
+            if self.campos.get("email") is None or \
+                    self.campos["email"].get().strip().lower() != email:
+                return
+            if erro:
+                self.empresa_nome = None
+                self.lbl_empresa.configure(text="Sem conexao com o WaspFiber", fg=t["ui_aviso"])
+                self._email_consultado = None
+            elif nome:
+                self.empresa_nome = nome
+                self.lbl_empresa.configure(text="Empresa: %s" % nome, fg=t["ui_texto"])
+                self.img_empresa.configure(image=nix_ui.icone("building-2", "acento"))
+            else:
+                self.empresa_nome = None
+                self.lbl_empresa.configure(text="@%s nao e de nenhuma empresa cadastrada"
+                                                % email.rsplit("@", 1)[1], fg=t["ui_aviso"])
+                self.img_empresa.configure(image=nix_ui.icone("building-2", "aviso"))
+        em_segundo_plano(self, lambda: nuvem.Conexao.empresa_do_email(email), pronto)
+
+    # ---------------- enviar ----------------
+    def enviar(self):
+        if self.modo == "entrar":
+            self._entrar()
+        else:
+            self._criar()
+
+    def _entrar(self):
+        email = self.campos["email"].get().strip()
+        senha = self.campos["senha"].get()
+        if not email or not senha:
+            self.mostrar_msg("Digite o e-mail e a senha.")
+            return
+        self.mostrar_msg("Entrando...", "info")
+        self.update_idletasks()
         try:
-            conexao = nuvem.Conexao.entrar(dados["url"], dados["empresa"], dados["usuario"],
-                                           dados["senha"])
+            conexao = nuvem.Conexao.entrar_email(email, senha)
         except nuvem.ErroServidor as falha:
-            erro.configure(text=str(falha))
-            campos["senha"].delete(0, "end")
-            return "break"
-        campos["senha"].delete(0, "end")
-        erro.configure(text="")
-        ao_entrar(conexao)
-        return "break"
-    for entrada in campos.values():
-        entrada.bind("<Return>", enviar)
-    primeiro = next((campos[k] for k in ("empresa", "usuario", "senha") if not campos[k].get()),
-                    campos["senha"])
-    return {"campos": campos, "erro": erro, "enviar": enviar, "foco": primeiro}
+            self.mostrar_msg(str(falha))
+            self.campos["senha"].delete(0, "end")
+            return
+        self.campos["senha"].delete(0, "end")
+        self.mostrar_msg("")
+        self.ao_entrar(conexao)
+
+    def _criar(self):
+        c = {k: e.get() for k, e in self.campos.items()}
+        if not c["nome"].strip() or not c["email"].strip() or not c["senha"]:
+            self.mostrar_msg("Preencha nome, e-mail e senha.")
+            return
+        if c["senha"] != c["senha2"]:
+            self.mostrar_msg("As duas senhas nao conferem.")
+            self.campos["senha2"].delete(0, "end")
+            return
+        if len(c["senha"]) < 8:
+            self.mostrar_msg("A senha precisa ter pelo menos 8 caracteres.")
+            return
+        self.mostrar_msg("Enviando o pedido...", "info")
+        self.update_idletasks()
+        try:
+            r = nuvem.Conexao.criar_conta(c["nome"].strip(), c["email"].strip(), c["senha"])
+        except nuvem.ErroServidor as falha:
+            self.mostrar_msg(str(falha))
+            return
+        self.montar("entrar")
+        self.mostrar_msg("Pedido enviado para a %s. Assim que o administrador aprovar, "
+                         "entre com o seu e-mail e a senha." % r.get("empresa_nome", "empresa"),
+                         "ok")
 
 
 class DialogEntrar(DialogoBase):
@@ -4472,29 +4629,91 @@ class DialogEntrar(DialogoBase):
 
     def __init__(self, parent):
         self.conexao = None
-        super().__init__(parent, "Entrar no servidor")
+        super().__init__(parent, "Entrar no WaspFiber")
 
     def body(self, master):
-        ttk.Label(master, text="A sessao com o servidor terminou. Entre de novo pra continuar "
-                               "(o diagrama aberto nao se perde).", wraplength=320,
-                  justify="left").pack(anchor="w")
-        self.form = montar_form_login(master, TEMA, "TkDefaultFont", self._entrou,
-                                      nuvem.ler_sessao())
-        return self.form["foco"]
+        ttk.Label(master, text="A sessao terminou. Entre de novo pra continuar (o diagrama "
+                               "aberto nao se perde).", wraplength=320,
+                  justify="left").pack(anchor="w", pady=(0, 6))
+        self.painel = PainelAcesso(master, TEMA, "TkDefaultFont", "TkDefaultFont",
+                                   self._entrou, modo_unico=True)
+        self.painel.pack(fill="x")
+        return self.painel.foco
+
+    def buttonbox(self):
+        self.bind("<Escape>", self.cancel)
 
     def _entrou(self, conexao):
         self.conexao = conexao
         self.ok()
 
-    def ok(self, _evento=None):
-        if self.conexao is None:
-            self.form["enviar"]()
-            if self.conexao is None:
-                return
-        super().ok()
-
     def validate(self):
         return self.conexao is not None
+
+
+class DialogPedidos(tk.Toplevel):
+    """Pedidos de acesso da empresa (so o administrador ve): aprovar / recusar."""
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.app = app
+        self.title("Pedidos de acesso")
+        self.configure(bg=TEMA["ui_fundo"])
+        self.transient(app)
+        self.geometry("560x420")
+        t = TEMA
+        tk.Label(self, text="Pedidos de acesso", bg=t["ui_fundo"], fg=t["ui_texto"],
+                 font=(app.fonte_titulo, 13)).pack(anchor="w", padx=18, pady=(16, 2))
+        tk.Label(self, text="Contas criadas com o e-mail da empresa, esperando a sua aprovacao.",
+                 bg=t["ui_fundo"], fg=t["ui_texto_fraco"], font=(app.fonte_ui, 9)).pack(
+            anchor="w", padx=18)
+        self.lista = ListaRolavel(self, t)
+        self.lista.pack(fill="both", expand=True, padx=12, pady=12)
+        self.atualizar()
+
+    def atualizar(self):
+        t = TEMA
+        self.lista.limpar()
+        try:
+            pedidos = self.app.conexao.pedidos()
+        except nuvem.ErroServidor as erro:
+            tk.Label(self.lista.corpo, text=str(erro), bg=t["ui_fundo"], fg=t["ui_erro"],
+                     wraplength=480, justify="left").pack(anchor="w", padx=8, pady=8)
+            return
+        if not pedidos:
+            tk.Label(self.lista.corpo, text="Nenhum pedido aguardando.", bg=t["ui_fundo"],
+                     fg=t["ui_texto_fraco"], font=(self.app.fonte_ui, 10)).pack(pady=30)
+        for p in pedidos:
+            linha = tk.Frame(self.lista.corpo, bg=t["ui_painel"], highlightthickness=1,
+                             highlightbackground=t["ui_borda"])
+            linha.pack(fill="x", pady=3)
+            textos = tk.Frame(linha, bg=t["ui_painel"])
+            textos.pack(side="left", fill="x", expand=True, padx=12, pady=8)
+            tk.Label(textos, text=p["nome"], bg=t["ui_painel"], fg=t["ui_texto"],
+                     font=(self.app.fonte_titulo, 10), anchor="w").pack(anchor="w")
+            tk.Label(textos, text="%s   ·   pediu em %s" % (p["email"], p["criado_em"]),
+                     bg=t["ui_painel"], fg=t["ui_texto_fraco"], font=(self.app.fonte_ui, 8),
+                     anchor="w").pack(anchor="w")
+            nix_ui.BotaoIcone(linha, t, "x", texto="Recusar",
+                              comando=lambda e=p["email"]: self.decidir(e, False)).pack(
+                side="right", padx=(0, 8))
+            nix_ui.BotaoIcone(linha, t, "check", texto="Aprovar", variante="acento",
+                              comando=lambda e=p["email"]: self.decidir(e, True)).pack(
+                side="right", padx=4)
+        self.lista.ligar_roda()
+
+    def decidir(self, email, aprovar):
+        if not aprovar and not messagebox.askyesno(
+                "Recusar pedido", "Recusar o acesso de %s? A conta pedida e apagada." % email,
+                parent=self):
+            return
+        try:
+            self.app.conexao.decidir_pedido(email, aprovar)
+        except nuvem.ErroServidor as erro:
+            messagebox.showwarning("Pedidos de acesso", str(erro), parent=self)
+        self.atualizar()
+        if self.app.tela_inicio.visivel():
+            self.app.tela_inicio.atualizar_pedidos()
 
 
 class TelaInicio(tk.Frame):
@@ -4555,7 +4774,7 @@ class TelaInicio(tk.Frame):
         dentro.pack(fill="x", padx=12, pady=10)
         linha = tk.Frame(dentro, bg=t["ui_painel"])
         linha.pack(fill="x")
-        self.lbl_servidor_titulo = tk.Label(linha, text="SERVIDOR", bg=t["ui_painel"],
+        self.lbl_servidor_titulo = tk.Label(linha, text="CONECTADO", bg=t["ui_painel"],
                                             fg=t["ui_texto_fraco"], font=(fonte, 7, "bold"))
         self.lbl_servidor_titulo.pack(side="left")
         self.bt_sair = BotaoIcone(linha, t, "x", texto="Sair", comando=self.sair)
@@ -4566,6 +4785,8 @@ class TelaInicio(tk.Frame):
         self.lbl_servidor = tk.Label(dentro, text="", bg=t["ui_painel"], fg=t["ui_texto_fraco"],
                                      font=(fonte, 8), anchor="w", justify="left", wraplength=280)
         self.lbl_servidor.pack(anchor="w")
+        self.bt_pedidos = BotaoIcone(dentro, t, "circle-alert", texto="Pedidos de acesso",
+                                     variante="normal", comando=lambda: DialogPedidos(self.app))
         self.quadro_pendentes = tk.Frame(dentro, bg=t["ui_painel"])
         self.lbl_pendentes = tk.Label(self.quadro_pendentes, text="", bg=t["ui_painel"],
                                       fg=t["ui_aviso"], font=(fonte, 8), anchor="w",
@@ -4620,13 +4841,8 @@ class TelaInicio(tk.Frame):
         caixa = tk.Frame(cartao, bg=t["ui_painel"])
         caixa.pack(padx=34, pady=28)
         tk.Label(caixa, image=nix_ui.logo(64), bg=t["ui_painel"]).pack(pady=(0, 10))
-        tk.Label(caixa, text="Entrar no servidor", bg=t["ui_painel"], fg=t["ui_texto"],
-                 font=(titulo, 14)).pack()
-        tk.Label(caixa, text="As cidades e os diagramas ficam no servidor da empresa.",
-                 bg=t["ui_painel"], fg=t["ui_texto_fraco"], font=(fonte, 9)).pack(pady=(2, 6))
-        self.form = montar_form_login(caixa, t, fonte, self._entrou, nuvem.ler_sessao())
-        BotaoIcone(caixa, t, None, texto="Entrar", variante="acento",
-                   comando=self.form["enviar"]).pack(fill="x", pady=(12, 0))
+        self.form = PainelAcesso(caixa, t, fonte, titulo, self._entrou)
+        self.form.pack(fill="x")
 
         self.bind_all("<Return>", self._enter, add="+")
 
@@ -4646,8 +4862,10 @@ class TelaInicio(tk.Frame):
     def _mostrar_login(self, mensagem=""):
         self.corpo.pack_forget()
         self.login.pack(fill="both", expand=True)
-        self.form["erro"].configure(text=mensagem)
-        self.after(50, lambda: self.form["foco"].focus_set())
+        if self.form.modo != "entrar":
+            self.form.montar("entrar")
+        self.form.mostrar_msg(mensagem)
+        self.after(50, lambda: self.form.foco.focus_set())
 
     def _entrou(self, conexao):
         self.app.conexao = conexao
@@ -4699,8 +4917,9 @@ class TelaInicio(tk.Frame):
         info = self.conexao.info
         self.lbl_empresa.configure(text="%s  ·  %s" % (info.get("empresa_nome") or info.get("empresa", ""),
                                                        info.get("nome") or info.get("usuario", "")))
-        self.lbl_servidor.configure(text=self.conexao.url)
+        self.lbl_servidor.configure(text=info.get("usuario", ""))
         self.atualizar_pendentes()
+        self.atualizar_pedidos()
         ok, lista = self._chamar(self.conexao.cidades)
         if not ok:
             return
@@ -4730,6 +4949,21 @@ class TelaInicio(tk.Frame):
         escolhida = next((c for c in lista if self.cidade and c["id"] == self.cidade["id"]), None) \
             or next((c for c in lista if c["id"] == ultima), None) or lista[0]
         self.escolher_cidade(escolhida, registrar=False)
+
+    def atualizar_pedidos(self):
+        """Administrador da empresa: botao com quantos pedidos de acesso esperam."""
+        if not self.conexao or self.conexao.info.get("papel") != "admin":
+            self.bt_pedidos.pack_forget()
+            return
+        try:
+            qtd = len(self.conexao.pedidos())
+        except nuvem.ErroServidor:
+            qtd = 0
+        self.bt_pedidos.configure(text="Pedidos de acesso (%d)" % qtd if qtd
+                                  else "Pedidos de acesso")
+        self.bt_pedidos.variante = "acento" if qtd else "normal"
+        self.bt_pedidos._sair()
+        self.bt_pedidos.pack(anchor="w", pady=(8, 0))
 
     def atualizar_pendentes(self):
         qtd = len(nuvem.pendentes())

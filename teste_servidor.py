@@ -35,6 +35,7 @@ dados = tempfile.mkdtemp(prefix="waspfiber_dados_")
 srv = ws.criar_servidor(dados, "127.0.0.1", 0)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
 url = "http://127.0.0.1:%d" % srv.server_address[1]
+nuvem.SERVIDOR_PADRAO = url          # o endereco e fixo no programa; no teste, o local
 arm = srv.RequestHandlerClass.armazem
 
 print("== contas ==")
@@ -126,6 +127,42 @@ res = nuvem.enviar_pendentes(c)
 checar(len(res["copias"]) == 1 and c.abrir("santos-sp", "cto-gonzaga-03")["versao"] == velho
        and len(c.diagramas("santos-sp")) == 3,
        "conflito na fila: vira copia, nao apaga o trabalho de ninguem", res)
+print("== e-mail, dominio e criar conta (B0.41) ==")
+arm.definir_dominio("junior-telecom", "@JuniorTelecom.com.br")
+try:
+    arm.definir_dominio("outro-provedor", "juniortelecom.com.br")
+    checar(False, "dominio de outra empresa recusado")
+except ValueError:
+    checar(True, "dominio de outra empresa recusado")
+checar(nuvem.Conexao.empresa_do_email("x@juniortelecom.com.br", url) == "Junior Telecom LTDA",
+       "empresa pelo dominio do e-mail")
+checar(nuvem.Conexao.empresa_do_email("x@gmail.com", url) is None, "dominio sem empresa: None")
+e = erro_de(lambda: nuvem.Conexao.criar_conta("Zé", "ze@gmail.com", "senha-do-ze-1", url))
+checar(e and e.status == 400 and "dominio" in str(e), "criar conta com dominio de fora: recusa")
+r = nuvem.Conexao.criar_conta("Zé Técnico", "Ze@JuniorTelecom.com.br", "senha-do-ze-1", url)
+checar(r["status"] == "pendente" and r["empresa_nome"] == "Junior Telecom LTDA", "conta criada pendente")
+e = erro_de(lambda: nuvem.Conexao.criar_conta("Zé", "ze@juniortelecom.com.br", "senha-do-ze-1", url))
+checar(e and e.status == 409, "e-mail repetido: 409")
+e = erro_de(lambda: nuvem.Conexao.entrar_email("ze@juniortelecom.com.br", "senha-do-ze-1", url))
+checar(e and e.status == 403 and "aprovacao" in str(e), "pendente nao entra (403)")
+arm.renomear_usuario("junior-telecom", "tulio", "tulio@juniortelecom.com.br")
+adm = nuvem.Conexao.entrar_email("TULIO@juniortelecom.com.br", "senha-forte-123", url)
+checar(adm.info["papel"] == "admin" and adm.info["empresa"] == "junior-telecom",
+       "login por e-mail (renomeado, mantem a senha e o papel)")
+checar([p["email"] for p in adm.pedidos()] == ["ze@juniortelecom.com.br"], "admin ve o pedido")
+comum = nuvem.Conexao.entrar(url, "outro-provedor", "ana", "outra-senha-456")
+e = erro_de(lambda: comum.pedidos())
+checar(e and e.status == 403, "quem nao e admin nao ve pedidos")
+adm.decidir_pedido("ze@juniortelecom.com.br", True)
+ze = nuvem.Conexao.entrar_email("ze@juniortelecom.com.br", "senha-do-ze-1", url)
+checar(ze.info["papel"] == "usuario" and ze.cidades()[0]["id"] == "santos-sp",
+       "aprovado: entra e ve as cidades da empresa")
+nuvem.Conexao.criar_conta("Intruso", "intruso@juniortelecom.com.br", "senha-intruso-1", url)
+adm.decidir_pedido("intruso@juniortelecom.com.br", False)
+e = erro_de(lambda: nuvem.Conexao.entrar_email("intruso@juniortelecom.com.br", "senha-intruso-1", url))
+checar(e and e.status == 401 and adm.pedidos() == [], "recusado: conta apagada")
+c = nuvem.Conexao.entrar(url, "junior-telecom", "tulio@juniortelecom.com.br", "senha-forte-123")
+
 print("== bloqueio e backup (B0.40) ==")
 ws.BLOQUEIO_S = 2
 for _ in range(5):
@@ -133,7 +170,7 @@ for _ in range(5):
 e = erro_de(lambda: nuvem.Conexao.entrar(url, "outro-provedor", "ana", "outra-senha-456"))
 checar(e and e.status == 429 and "Muitas tentativas" in str(e),
        "5 senhas erradas: bloqueia ate a senha certa", e and str(e))
-checar(nuvem.Conexao.entrar(url, "junior-telecom", "tulio", "senha-forte-123").token,
+checar(nuvem.Conexao.entrar_email("tulio@juniortelecom.com.br", "senha-forte-123", url).token,
        "o bloqueio e so daquele login (os outros entram)")
 time.sleep(2.1)
 checar(nuvem.Conexao.entrar(url, "outro-provedor", "ana", "outra-senha-456").token,
