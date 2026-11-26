@@ -28,9 +28,10 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import waspfiber_ui as nix_ui   # icones, botoes, menus e cartoes da interface
 import waspfiber_mapa as mapa   # localizacao do diagrama (B0.34)
+import waspfiber_cidades as cidades   # cidades (pastas) e diagramas (B0.36)
 
 APP_NOME = "WaspFiber"
-VERSAO = "B0.35"
+VERSAO = "B0.36"
 EXTENSAO = ".wasp.json"
 EXTENSAO_NIX = ".nix.json"      # redes salvas quando o programa se chamava Nix
 
@@ -4180,6 +4181,504 @@ class DialogPendencias(tk.Toplevel):
 #  INTERFACE: JANELA PRINCIPAL
 # ============================================================================
 
+# ============================================================================
+#  TELA INICIAL: CIDADES E DIAGRAMAS (B0.36)
+# ============================================================================
+
+ICONE_LOCAL = {"POP": "server", "CEO": "cable", "CTO": "split"}
+
+
+class DialogNovaCidade(DialogoBase):
+    """Cadastra uma cidade: cria a pasta 'Nome - UF' dentro da pasta do
+    provedor (a pasta compartilhada no servidor, por exemplo)."""
+
+    def __init__(self, parent, pasta_inicial):
+        self.pasta_inicial = pasta_inicial
+        self.resultado = None
+        super().__init__(parent, "Nova cidade")
+
+    def body(self, master):
+        ttk.Label(master, text="Nome da cidade:").grid(row=0, column=0, sticky="w", pady=3)
+        self.e_nome = ttk.Entry(master, width=34)
+        self.e_nome.grid(row=0, column=1, columnspan=2, sticky="we", pady=3)
+        ttk.Label(master, text="UF:").grid(row=1, column=0, sticky="w", pady=3)
+        self.var_uf = tk.StringVar(value="")
+        ttk.Combobox(master, textvariable=self.var_uf, width=6, state="readonly",
+                     values=("",) + cidades.UFS).grid(row=1, column=1, sticky="w", pady=3)
+        ttk.Label(master, text="Guardar em:").grid(row=2, column=0, sticky="w", pady=3)
+        self.var_pasta = tk.StringVar(value=self.pasta_inicial)
+        ttk.Entry(master, textvariable=self.var_pasta, width=34).grid(row=2, column=1,
+                                                                     sticky="we", pady=3)
+        ttk.Button(master, text="Escolher...", command=self._escolher).grid(
+            row=2, column=2, padx=(4, 0), pady=3)
+        ttk.Label(master, text="Cada cidade vira uma pasta com os diagramas dela "
+                               "(POP, caixas de emenda, CTOs). Use uma pasta compartilhada "
+                               "no servidor pra equipe toda ver as mesmas cidades.",
+                  style="Fraco.TLabel", wraplength=380, justify="left").grid(
+            row=3, column=0, columnspan=3, sticky="w", pady=(10, 0))
+        return self.e_nome
+
+    def _escolher(self):
+        pasta = filedialog.askdirectory(parent=self, title="Pasta onde ficam as cidades",
+                                        initialdir=self.var_pasta.get() or None)
+        if pasta:
+            self.var_pasta.set(os.path.normpath(pasta))
+
+    def validate(self):
+        if not self.e_nome.get().strip():
+            messagebox.showwarning("Nova cidade", "Informe o nome da cidade.", parent=self)
+            return False
+        if not self.var_pasta.get().strip():
+            messagebox.showwarning("Nova cidade", "Escolha onde guardar a cidade.", parent=self)
+            return False
+        return True
+
+    def apply(self):
+        self.resultado = (self.e_nome.get().strip(), self.var_uf.get().strip(),
+                          self.var_pasta.get().strip())
+
+
+class DialogNovoDiagrama(DialogoBase):
+    """Novo diagrama numa cidade: de qual local ele e (POP, CEO, CTO) e o nome."""
+
+    def __init__(self, parent, cidade):
+        self.cidade = cidade
+        self.resultado = None
+        super().__init__(parent, "Novo diagrama - %s" % cidade["titulo"])
+
+    def body(self, master):
+        ttk.Label(master, text="Este diagrama e de um:").grid(row=0, column=0, sticky="w", pady=3)
+        self.var_tipo = tk.StringVar(value=mapa.ROTULO_TIPO_LOCAL["CTO"])
+        ttk.Combobox(master, textvariable=self.var_tipo, state="readonly", width=28,
+                     values=[r for _, r in mapa.TIPOS_LOCAL]).grid(row=0, column=1, pady=3,
+                                                                   sticky="w")
+        ttk.Label(master, text="Nome / identificacao:").grid(row=1, column=0, sticky="w", pady=3)
+        self.e_nome = ttk.Entry(master, width=31)
+        self.e_nome.grid(row=1, column=1, pady=3, sticky="w")
+        self.var_mapa = tk.BooleanVar(value=True)
+        ttk.Checkbutton(master, text="Marcar a localizacao no mapa em seguida",
+                        variable=self.var_mapa).grid(row=2, column=0, columnspan=2,
+                                                     sticky="w", pady=(8, 0))
+        ttk.Label(master, text="Ex.: POP Centro, CEO-012, CTO Rua das Flores 03",
+                  style="Fraco.TLabel").grid(row=3, column=0, columnspan=2, sticky="w",
+                                             pady=(8, 0))
+        return self.e_nome
+
+    def validate(self):
+        if not self.e_nome.get().strip():
+            messagebox.showwarning("Novo diagrama", "Informe o nome do local.", parent=self)
+            return False
+        return True
+
+    def apply(self):
+        tipo = {r: k for k, r in mapa.TIPOS_LOCAL}.get(self.var_tipo.get(), "")
+        self.resultado = (tipo, self.e_nome.get().strip(), bool(self.var_mapa.get()))
+
+
+class LinhaLista(tk.Frame):
+    """Uma linha clicavel das listas da tela inicial: icone, titulo, detalhe
+    embaixo e um texto a direita. Clique seleciona, duplo clique abre."""
+
+    def __init__(self, pai, tema, icone, titulo, detalhe="", direita="", ao_clicar=None,
+                 ao_duplo=None, fonte="TkDefaultFont"):
+        super().__init__(pai, bg=tema["ui_fundo"], cursor="hand2")
+        self.tema, self.selecionado = tema, False
+        self.nome_icone = icone
+        self.img = tk.Label(self, image=nix_ui.icone(icone, "fraco"), bg=tema["ui_fundo"])
+        self.img.grid(row=0, column=0, rowspan=2, padx=(10, 12), pady=9, sticky="n")
+        self.lbl_titulo = tk.Label(self, text=titulo, bg=tema["ui_fundo"], fg=tema["ui_texto"],
+                                   anchor="w", font=(fonte, 10))
+        self.lbl_titulo.grid(row=0, column=1, sticky="we", pady=(8, 0))
+        self.lbl_detalhe = tk.Label(self, text=detalhe, bg=tema["ui_fundo"],
+                                    fg=tema["ui_texto_fraco"], anchor="w", font=(fonte, 8))
+        self.lbl_detalhe.grid(row=1, column=1, sticky="we", pady=(0, 8))
+        self.lbl_direita = tk.Label(self, text=direita, bg=tema["ui_fundo"],
+                                    fg=tema["ui_texto_fraco"], anchor="e", font=(fonte, 8))
+        self.lbl_direita.grid(row=0, column=2, rowspan=2, padx=(8, 12))
+        self.columnconfigure(1, weight=1)
+        self.partes = (self, self.img, self.lbl_titulo, self.lbl_detalhe, self.lbl_direita)
+        for parte in self.partes:
+            parte.bind("<Enter>", lambda _e: self._pintar(True))
+            parte.bind("<Leave>", lambda _e: self._pintar(False))
+            if ao_clicar:
+                parte.bind("<ButtonRelease-1>", lambda _e: ao_clicar())
+            if ao_duplo:
+                parte.bind("<Double-Button-1>", lambda _e: ao_duplo())
+
+    def _pintar(self, hover=False):
+        t = self.tema
+        fundo = t["ui_painel"] if (self.selecionado or hover) else t["ui_fundo"]
+        for parte in self.partes:
+            parte.configure(bg=fundo)
+        self.img.configure(image=nix_ui.icone(self.nome_icone,
+                                              "acento" if self.selecionado else
+                                              ("texto" if hover else "fraco")))
+
+    def marcar(self, sim):
+        self.selecionado = sim
+        self.lbl_titulo.configure(fg=self.tema["ui_acento"] if sim else self.tema["ui_texto"])
+        self._pintar()
+
+
+class ListaRolavel(tk.Frame):
+    """Coluna com rolagem (Canvas + Frame), a roda do mouse funciona em cima
+    de qualquer linha."""
+
+    def __init__(self, pai, tema):
+        super().__init__(pai, bg=tema["ui_fundo"])
+        self.tema = tema
+        barra = ttk.Scrollbar(self, orient="vertical")
+        self.tela = tk.Canvas(self, bg=tema["ui_fundo"], highlightthickness=0, bd=0,
+                              yscrollcommand=nix_ui.rolagem_automatica(barra))
+        barra.configure(command=self.tela.yview)
+        self.tela.pack(side="left", fill="both", expand=True)
+        self.corpo = tk.Frame(self.tela, bg=tema["ui_fundo"])
+        janela = self.tela.create_window(0, 0, window=self.corpo, anchor="nw")
+        self.corpo.bind("<Configure>", lambda _e: self.tela.configure(
+            scrollregion=self.tela.bbox("all")))
+        self.tela.bind("<Configure>", lambda e: self.tela.itemconfigure(janela, width=e.width))
+
+    def limpar(self):
+        for filho in self.corpo.winfo_children():
+            filho.destroy()
+        self.tela.yview_moveto(0)
+
+    def ligar_roda(self):
+        def rolar(evento):
+            if getattr(evento, "num", None) == 4 or getattr(evento, "delta", 0) > 0:
+                self.tela.yview_scroll(-2, "units")
+            else:
+                self.tela.yview_scroll(2, "units")
+            return "break"
+
+        def ligar(widget):
+            for sequencia in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                widget.bind(sequencia, rolar, add="+")
+            for filho in widget.winfo_children():
+                ligar(filho)
+        ligar(self.tela)
+        ligar(self.corpo)
+
+
+def _quando(segundos):
+    try:
+        return time.strftime("%d/%m/%Y %H:%M", time.localtime(segundos))
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
+class TelaInicio(tk.Frame):
+    """Primeira tela do programa: escolher a cidade (pasta) e o diagrama
+    (POP / CEO / CTO) - ou cadastrar uma cidade / um diagrama novo. Fica por
+    cima do editor e some quando um diagrama e aberto."""
+
+    def __init__(self, app):
+        t = TEMA
+        super().__init__(app, bg=t["ui_fundo"])
+        self.app = app
+        self.cidade = None
+        self.linhas_cidade = {}
+        self.linhas_diagrama = {}
+        self.diagrama_escolhido = None
+        BotaoIcone = nix_ui.BotaoIcone
+        fonte = app.fonte_ui
+
+        # ----- topo -----
+        topo = tk.Frame(self, bg=t["ui_fundo"])
+        topo.pack(fill="x", padx=24, pady=(18, 8))
+        tk.Label(topo, image=nix_ui.logo(32), bg=t["ui_fundo"]).pack(side="left")
+        tk.Label(topo, text=APP_NOME, bg=t["ui_fundo"], fg=t["ui_texto"],
+                 font=(fonte, 15)).pack(side="left", padx=(10, 6))
+        tk.Label(topo, text=VERSAO, bg=t["ui_fundo"], fg=t["ui_texto_fraco"],
+                 font=(fonte, 9)).pack(side="left", pady=(6, 0))
+        BotaoIcone(topo, t, "circle-help", texto="Como usar",
+                   comando=app.acao_ajuda).pack(side="right")
+        BotaoIcone(topo, t, "list-tree", texto="Ver a rede de exemplo",
+                   comando=app.acao_exemplo).pack(side="right", padx=(0, 6))
+        tk.Frame(self, bg=t["ui_borda"], height=1).pack(fill="x")
+
+        corpo = tk.Frame(self, bg=t["ui_fundo"])
+        corpo.pack(fill="both", expand=True)
+
+        # ----- coluna das cidades -----
+        esquerda = tk.Frame(corpo, bg=t["ui_fundo"], width=360)
+        esquerda.pack(side="left", fill="y")
+        esquerda.pack_propagate(False)
+        cab = tk.Frame(esquerda, bg=t["ui_fundo"])
+        cab.pack(fill="x", padx=(24, 12), pady=(18, 10))
+        tk.Label(cab, text=espacado("CIDADES"), bg=t["ui_fundo"], fg=t["ui_texto_fraco"],
+                 font=(fonte, 8)).pack(side="left")
+        botoes = tk.Frame(esquerda, bg=t["ui_fundo"])
+        botoes.pack(fill="x", padx=(20, 12), pady=(0, 10))
+        BotaoIcone(botoes, t, "plus", texto="Nova cidade", variante="acento",
+                   comando=self.nova_cidade).pack(side="left")
+        BotaoIcone(botoes, t, "folder-open", texto="Abrir pasta de cidade", variante="normal",
+                   comando=self.abrir_pasta_cidade).pack(side="left", padx=(6, 0))
+        self.lista_cidades = ListaRolavel(esquerda, t)
+        self.lista_cidades.pack(fill="both", expand=True, padx=(12, 6))
+        rodape = tk.Frame(esquerda, bg=t["ui_fundo"])
+        rodape.pack(fill="x", padx=(24, 12), pady=(8, 14))
+        tk.Label(rodape, text="PASTA DAS CIDADES", bg=t["ui_fundo"], fg=t["ui_texto_fraco"],
+                 font=(fonte, 7)).pack(anchor="w")
+        linha = tk.Frame(rodape, bg=t["ui_fundo"])
+        linha.pack(fill="x")
+        self.lbl_pasta = tk.Label(linha, text="", bg=t["ui_fundo"], fg=t["ui_texto"],
+                                  font=(fonte, 8), anchor="w", justify="left", wraplength=250)
+        self.lbl_pasta.pack(side="left", fill="x", expand=True)
+        BotaoIcone(linha, t, "folder-search", dica="Trocar a pasta das cidades",
+                   comando=self.trocar_pasta).pack(side="right")
+
+        tk.Frame(corpo, bg=t["ui_borda"], width=1).pack(side="left", fill="y")
+
+        # ----- coluna dos diagramas -----
+        self.direita = tk.Frame(corpo, bg=t["ui_fundo"])
+        self.direita.pack(side="left", fill="both", expand=True)
+        self.cab_cidade = tk.Frame(self.direita, bg=t["ui_fundo"])
+        self.cab_cidade.pack(fill="x", padx=28, pady=(18, 6))
+        self.lbl_cidade = tk.Label(self.cab_cidade, text="", bg=t["ui_fundo"], fg=t["ui_texto"],
+                                   font=(fonte, 14), anchor="w")
+        self.lbl_cidade.pack(anchor="w")
+        self.lbl_cidade_info = tk.Label(self.cab_cidade, text="", bg=t["ui_fundo"],
+                                        fg=t["ui_texto_fraco"], font=(fonte, 8), anchor="w")
+        self.lbl_cidade_info.pack(anchor="w", pady=(2, 0))
+        self.barra_diagramas = tk.Frame(self.direita, bg=t["ui_fundo"])
+        self.barra_diagramas.pack(fill="x", padx=24, pady=(6, 8))
+        BotaoIcone(self.barra_diagramas, t, "plus", texto="Novo diagrama", variante="acento",
+                   comando=self.novo_diagrama).pack(side="left")
+        self.bt_abrir = BotaoIcone(self.barra_diagramas, t, "folder-open", texto="Abrir",
+                                   variante="normal", comando=self.abrir_escolhido)
+        self.bt_abrir.pack(side="left", padx=(6, 0))
+        BotaoIcone(self.barra_diagramas, t, "folder-search", texto="Mostrar a pasta",
+                   comando=self.mostrar_pasta).pack(side="left", padx=(6, 0))
+        BotaoIcone(self.barra_diagramas, t, "x", dica="Tirar esta cidade da lista "
+                   "(nao apaga nada)", comando=self.esquecer).pack(side="right")
+        self.lista_diagramas = ListaRolavel(self.direita, t)
+        self.lista_diagramas.pack(fill="both", expand=True, padx=(16, 10), pady=(0, 14))
+
+        # convite quando nao ha nenhuma cidade
+        self.vazio = tk.Frame(self.direita, bg=t["ui_fundo"])
+        tk.Label(self.vazio, image=nix_ui.logo_emblema(), bg=t["ui_fundo"]).pack(pady=(10, 14))
+        tk.Label(self.vazio, text="Comece cadastrando uma cidade", bg=t["ui_fundo"],
+                 fg=t["ui_texto"], font=(fonte, 13)).pack()
+        tk.Label(self.vazio, text="Cada cidade e uma pasta com os diagramas dos POPs, caixas "
+                                  "de emenda e CTOs dela.\nUse uma pasta compartilhada no "
+                                  "servidor pra equipe toda trabalhar nas mesmas cidades.",
+                 bg=t["ui_fundo"], fg=t["ui_texto_fraco"], font=(fonte, 9),
+                 justify="center").pack(pady=(6, 14))
+        caixa = tk.Frame(self.vazio, bg=t["ui_fundo"])
+        caixa.pack()
+        BotaoIcone(caixa, t, "plus", texto="Nova cidade", variante="acento",
+                   comando=self.nova_cidade).pack(side="left")
+        BotaoIcone(caixa, t, "folder-open", texto="Abrir pasta de cidade", variante="normal",
+                   comando=self.abrir_pasta_cidade).pack(side="left", padx=6)
+
+        self.bind_all("<Return>", self._enter, add="+")
+
+    # ---------------- dados ----------------
+    def mostrar(self):
+        """Recarrega cidades e diagramas (outra pessoa pode ter mexido na
+        pasta compartilhada) e mostra a tela."""
+        self.place(x=0, y=0, relwidth=1, relheight=1)
+        self.lift()
+        self.atualizar()
+
+    def visivel(self):
+        return bool(self.place_info())
+
+    def atualizar(self):
+        pasta = cidades.pasta_provedor()
+        self.lbl_pasta.configure(text=pasta or "(ainda nao escolhida)")
+        lista = cidades.cidades_conhecidas()
+        self.lista_cidades.limpar()
+        self.linhas_cidade = {}
+        for cidade in lista:
+            qtd = len(cidades.listar_diagramas(cidade["pasta"]))
+            detalhe = "%d diagrama%s" % (qtd, "" if qtd == 1 else "s")
+            if cidade.get("fora_da_pasta"):
+                detalhe += "   ·   " + cidade["pasta"]
+            linha = LinhaLista(self.lista_cidades.corpo, TEMA, "building-2", cidade["titulo"],
+                               detalhe, ao_clicar=lambda c=cidade: self.escolher_cidade(c),
+                               ao_duplo=lambda c=cidade: self.escolher_cidade(c),
+                               fonte=self.app.fonte_ui)
+            linha.pack(fill="x")
+            self.linhas_cidade[os.path.normcase(cidade["pasta"])] = linha
+        self.lista_cidades.ligar_roda()
+        escolhida = None
+        if self.cidade and cidades.ler_cidade(self.cidade["pasta"]):
+            escolhida = self.cidade["pasta"]
+        elif cidades.ultima_cidade():
+            escolhida = cidades.ultima_cidade()
+        elif lista:
+            escolhida = lista[0]["pasta"]
+        cidade = cidades.ler_cidade(escolhida) if escolhida else None
+        if cidade:
+            self.escolher_cidade(cidade, registrar=False)
+        else:
+            self.cidade = None
+            self._mostrar_vazio(True)
+
+    def _mostrar_vazio(self, sim):
+        if sim:
+            for parte in (self.cab_cidade, self.barra_diagramas, self.lista_diagramas):
+                parte.pack_forget()
+            self.vazio.place(relx=0.5, rely=0.42, anchor="center")
+        else:
+            self.vazio.place_forget()
+            if not self.cab_cidade.winfo_ismapped():
+                self.cab_cidade.pack(fill="x", padx=28, pady=(18, 6))
+                self.barra_diagramas.pack(fill="x", padx=24, pady=(6, 8))
+                self.lista_diagramas.pack(fill="both", expand=True, padx=(16, 10), pady=(0, 14))
+
+    def escolher_cidade(self, cidade, registrar=True):
+        self.cidade = cidade
+        if registrar:
+            cidades.registrar_recente(cidade["pasta"])
+        for chave, linha in self.linhas_cidade.items():
+            linha.marcar(chave == os.path.normcase(cidade["pasta"]))
+        self._mostrar_vazio(False)
+        self.lbl_cidade.configure(text=cidade["titulo"])
+        self.lbl_cidade_info.configure(text=cidade["pasta"])
+        self.listar_diagramas()
+
+    def listar_diagramas(self):
+        t = TEMA
+        self.lista_diagramas.limpar()
+        self.linhas_diagrama = {}
+        self.diagrama_escolhido = None
+        itens = cidades.listar_diagramas(self.cidade["pasta"])
+        if not itens:
+            caixa = tk.Frame(self.lista_diagramas.corpo, bg=t["ui_fundo"])
+            caixa.pack(fill="x", pady=40)
+            tk.Label(caixa, text="Nenhum diagrama nesta cidade ainda.", bg=t["ui_fundo"],
+                     fg=t["ui_texto"], font=(self.app.fonte_ui, 11)).pack()
+            tk.Label(caixa, text="Crie o primeiro: o POP, uma caixa de emenda ou uma CTO.",
+                     bg=t["ui_fundo"], fg=t["ui_texto_fraco"],
+                     font=(self.app.fonte_ui, 9)).pack(pady=(4, 0))
+        for item in itens:
+            partes = []
+            if item["erro"]:
+                partes.append(item["erro"])
+            else:
+                if item["endereco"]:
+                    partes.append(item["endereco"])
+                partes.append("%d equipamento%s  ·  %d fusoes" % (
+                    item["equipamentos"], "" if item["equipamentos"] == 1 else "s",
+                    item["fusoes"]))
+                if not item["tem_coordenada"]:
+                    partes.append("sem localizacao no mapa")
+            titulo = ("%s   %s" % (item["tipo"], item["titulo"])) if item["tipo"] else item["titulo"]
+            linha = LinhaLista(self.lista_diagramas.corpo, t,
+                               ICONE_LOCAL.get(item["tipo"], "file-text"), titulo,
+                               "   ·   ".join(partes), "alterado em\n" + _quando(item["modificado"]),
+                               ao_clicar=lambda i=item: self._escolher_diagrama(i),
+                               ao_duplo=lambda i=item: self.app.abrir_diagrama(i["caminho"]),
+                               fonte=self.app.fonte_ui)
+            linha.pack(fill="x")
+            self.linhas_diagrama[item["caminho"]] = linha
+        self.lista_diagramas.ligar_roda()
+        qtd = len(itens)
+        self.lbl_cidade_info.configure(text="%s      %d diagrama%s" % (
+            self.cidade["pasta"], qtd, "" if qtd == 1 else "s"))
+
+    def _escolher_diagrama(self, item):
+        self.diagrama_escolhido = item["caminho"]
+        for caminho, linha in self.linhas_diagrama.items():
+            linha.marcar(caminho == item["caminho"])
+
+    def _enter(self, evento):
+        if self.visivel() and evento.widget.winfo_toplevel() is self.app \
+                and self.diagrama_escolhido:
+            self.abrir_escolhido()
+
+    # ---------------- acoes ----------------
+    def abrir_escolhido(self):
+        if self.diagrama_escolhido:
+            self.app.abrir_diagrama(self.diagrama_escolhido)
+        elif self.cidade:
+            self.app.status.config(text="Escolha um diagrama da lista (ou crie um novo).")
+
+    def nova_cidade(self):
+        pasta = cidades.pasta_provedor() or cidades.pasta_provedor_sugerida()
+        dialogo = DialogNovaCidade(self.app, pasta)
+        if not dialogo.resultado:
+            return
+        nome, uf, pasta = dialogo.resultado
+        try:
+            os.makedirs(pasta, exist_ok=True)
+            cidade = cidades.criar_cidade(pasta, nome, uf)
+        except (ValueError, OSError) as erro:
+            messagebox.showwarning("Nova cidade", str(erro))
+            return
+        if not cidades.pasta_provedor() or not os.path.samefile(cidades.pasta_provedor(), pasta):
+            cidades.definir_pasta_provedor(pasta)
+        cidades.registrar_recente(cidade["pasta"])
+        self.cidade = cidade
+        self.atualizar()
+
+    def abrir_pasta_cidade(self):
+        pasta = filedialog.askdirectory(parent=self.app, title="Abrir a pasta de uma cidade",
+                                        initialdir=cidades.pasta_provedor() or None)
+        if not pasta:
+            return
+        pasta = os.path.normpath(pasta)
+        if not cidades.eh_cidade(pasta):
+            dentro = cidades.listar_cidades(pasta)
+            if dentro:
+                # escolheu a pasta do provedor (que tem as cidades dentro)
+                cidades.definir_pasta_provedor(pasta)
+                self.cidade = dentro[0]
+                self.atualizar()
+                return
+            if not messagebox.askyesno(
+                    "Abrir pasta de cidade",
+                    "Esta pasta ainda nao e uma cidade do %s:\n%s\n\nUsar esta pasta como "
+                    "cidade? (os diagramas .wasp.json que estiverem nela aparecem na lista)"
+                    % (APP_NOME, pasta)):
+                return
+        try:
+            cidade = cidades.abrir_pasta_como_cidade(pasta)
+        except (ValueError, OSError) as erro:
+            messagebox.showwarning("Abrir pasta de cidade", str(erro))
+            return
+        if not cidades.pasta_provedor():
+            cidades.definir_pasta_provedor(os.path.dirname(cidade["pasta"]))
+        cidades.registrar_recente(cidade["pasta"])
+        self.cidade = cidade
+        self.atualizar()
+
+    def trocar_pasta(self):
+        pasta = filedialog.askdirectory(parent=self.app, title="Pasta onde ficam as cidades",
+                                        initialdir=cidades.pasta_provedor() or None)
+        if pasta:
+            cidades.definir_pasta_provedor(os.path.normpath(pasta))
+            self.cidade = None
+            self.atualizar()
+
+    def novo_diagrama(self):
+        if self.cidade:
+            self.app.novo_diagrama(self.cidade)
+
+    def mostrar_pasta(self):
+        if self.cidade and sys.platform.startswith("win"):
+            os.startfile(self.cidade["pasta"])
+
+    def esquecer(self):
+        if not self.cidade:
+            return
+        cidades.esquecer_cidade(self.cidade["pasta"])
+        dentro = cidades.pasta_provedor() and os.path.normcase(os.path.dirname(
+            self.cidade["pasta"])) == os.path.normcase(cidades.pasta_provedor())
+        if dentro:
+            messagebox.showinfo("Cidade", "Esta cidade esta dentro da pasta das cidades, entao "
+                                          "ela continua na lista. Nada foi apagado.")
+        gravar_prefs = cidades.gravar_prefs
+        if cidades.ultima_cidade() and os.path.normcase(cidades.ultima_cidade()) == \
+                os.path.normcase(self.cidade["pasta"]):
+            gravar_prefs({"ultima_cidade": ""})
+        self.cidade = None
+        self.atualizar()
+
+
 class App(tk.Tk):
     DICA = ("Clique numa porta do diagrama e depois em outra para criar a fusao. "
             "Arraste o equipamento (por qualquer parte) para move-lo. "
@@ -4194,6 +4693,7 @@ class App(tk.Tk):
 
         self.rede = Rede()
         self.caminho_atual = None
+        self.cidade_atual = None       # cidade (pasta) do diagrama aberto - B0.36
         self.porta_selecionada = None
         self.escala = 1.0
         self.cena = None
@@ -4216,6 +4716,9 @@ class App(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.acao_sair)
         nix_ui.barra_de_titulo_escura(self)
         self.atualizar_tudo(centralizar=True)
+        # B0.36: o programa abre na tela das cidades, nao direto no diagrama
+        self.tela_inicio = TelaInicio(self)
+        self.tela_inicio.mostrar()
         self.after(400, self._oferecer_recuperacao)
 
     # ---------------- protecao do trabalho ----------------
@@ -4313,7 +4816,9 @@ class App(tk.Tk):
                 % (len(rede.equipamentos), len(rede.fusoes), quando, detalhe)):
             self.rede = rede
             self.caminho_atual = arquivo or None
+            self.cidade_atual = cidades.cidade_do_arquivo(self.caminho_atual)
             self.alteracoes_pendentes = True
+            self.mostrar_editor()
             self.atualizar_tudo(centralizar=True)
         else:
             apagar_autosave()
@@ -4364,6 +4869,8 @@ class App(tk.Tk):
         """Tudo que o programa sabe fazer: alimenta a paleta (Ctrl+K) e o
         menu '...'. (icone, nome, atalho, funcao, palavras extras pra busca)"""
         return [
+            ("house", "Inicio (cidades e diagramas)", "", self.mostrar_inicio,
+             "voltar cidade cidades pasta inicio diagramas trocar abrir"),
             ("plus", "Novo equipamento", "", self.acao_novo_equipamento,
              "criar cadastrar dio olt switch rb acomodador cto cabo fibra"),
             ("layers", "Criar varios equipamentos", "", self.acao_criar_lote, "lote leva serie"),
@@ -4428,7 +4935,8 @@ class App(tk.Tk):
     def _itens_menu(self):
         c = {nome: (ic, nome, atalho, fn) for ic, nome, atalho, fn, _ in self._comandos()}
         grupo = lambda *nomes: [c[n] for n in nomes]
-        return (grupo("Nova rede", "Abrir rede", "Salvar", "Salvar como") + [None]
+        return (grupo("Inicio (cidades e diagramas)") + [None]
+                + grupo("Nova rede", "Abrir rede", "Salvar", "Salvar como") + [None]
                 + grupo("Exportar diagrama", "Relatorio PDF completo",
                         "Planilha para o Excel (CSV)") + [None]
                 + grupo("Localizacao do diagrama (mapa)", "Abrir no Google Maps",
@@ -4624,6 +5132,8 @@ class App(tk.Tk):
         # ----- barra do topo -----
         barra = tk.Frame(self, bg=t["ui_fundo"])
         barra.pack(fill="x", padx=14, pady=10)
+        BotaoIcone(barra, t, "house", dica="Inicio: cidades e diagramas",
+                   comando=self.mostrar_inicio).pack(side="left", padx=(0, 8))
         marca = tk.Label(barra, image=nix_ui.logo(32), bg=t["ui_fundo"])
         marca.pack(side="left")
         nix_ui.Tooltip(marca, "%s %s" % (APP_NOME, VERSAO), t)
@@ -4845,6 +5355,8 @@ class App(tk.Tk):
 
     # ---------------- paleta de comandos (Ctrl+K) ----------------
     def abrir_paleta(self, texto=""):
+        if getattr(self, "tela_inicio", None) is not None and self.tela_inicio.visivel():
+            return
         """Campo unico pra achar qualquer comando OU qualquer coisa na rede
         (equipamento, modulo, cliente, porta). Setas escolhem, Enter executa."""
         if self.paleta is not None:
@@ -5271,7 +5783,10 @@ class App(tk.Tk):
             if arquivo.lower().endswith(sufixo):
                 arquivo = arquivo[:-len(sufixo)]
                 break
-        self.lbl_arquivo.configure(text=arquivo)
+        cidade = getattr(self, "cidade_atual", None)
+        self.lbl_arquivo.configure(text=("%s   ›   %s" % (cidade["titulo"], arquivo))
+                                   if cidade else arquivo)
+        self.title("%s - %s" % (APP_NOME, arquivo) if self.caminho_atual else APP_NOME)
         self.lbl_alterado.configure(text="•" if self.alteracoes_pendentes else "")
         if hasattr(self, "botao_local"):
             local = self.rede.local
@@ -5359,6 +5874,80 @@ class App(tk.Tk):
         return ("porta", partes[1], partes[2] or None, int(partes[3]))
 
     # ---------------- arquivo ----------------
+    # ---------------- inicio / cidades (B0.36) ----------------
+    def mostrar_editor(self):
+        if getattr(self, "tela_inicio", None) is not None:
+            self.tela_inicio.place_forget()
+
+    def mostrar_inicio(self):
+        """Volta pra tela das cidades (pergunta antes se ha algo nao salvo)."""
+        if self.tela_inicio.visivel():
+            return
+        if not self._confirmar_descarte("Voltar ao inicio"):
+            return
+        self.fechar_paleta()
+        self.rede = Rede()
+        self.caminho_atual = None
+        self.porta_selecionada = None
+        self.destaque = set()
+        self._historico.clear()
+        self._refazer.clear()
+        self.alteracoes_pendentes = False
+        apagar_autosave()
+        self.atualizar_tudo(centralizar=True)
+        if self.cidade_atual:
+            self.tela_inicio.cidade = cidades.ler_cidade(self.cidade_atual["pasta"])
+        self.tela_inicio.mostrar()
+
+    def _abrir_caminho(self, caminho):
+        try:
+            rede = Rede.carregar(caminho)
+        except Exception as erro:
+            messagebox.showerror("Erro ao abrir", "%s\n\n%s" % (caminho, erro))
+            return False
+        self.rede = rede
+        self.caminho_atual = caminho
+        self.cidade_atual = cidades.cidade_do_arquivo(caminho)
+        if self.cidade_atual:
+            cidades.registrar_recente(self.cidade_atual["pasta"])
+        self.porta_selecionada = None
+        self.destaque = set()
+        self._historico.clear()
+        self._refazer.clear()
+        self.alteracoes_pendentes = False
+        apagar_autosave()
+        self.mostrar_editor()
+        self.atualizar_tudo(centralizar=True)
+        return True
+
+    def abrir_diagrama(self, caminho):
+        if not self._confirmar_descarte("Abrir diagrama"):
+            return False
+        return self._abrir_caminho(caminho)
+
+    def novo_diagrama(self, cidade):
+        """Cria o diagrama de um local (POP / CEO / CTO) na pasta da cidade,
+        ja salvo, e abre no editor."""
+        dialogo = DialogNovoDiagrama(self, cidade)
+        if not dialogo.resultado:
+            return None
+        tipo, nome, marcar = dialogo.resultado
+        rede = Rede()
+        rede.definir_local({"tipo": tipo, "nome": nome, "cidade": cidade["titulo"]})
+        caminho = cidades.caminho_novo_diagrama(cidade["pasta"], nome)
+        try:
+            rede.salvar(caminho)
+        except OSError as erro:
+            messagebox.showerror("Novo diagrama", "Nao consegui criar o arquivo:\n%s\n\n%s"
+                                 % (caminho, erro))
+            return None
+        if not self._abrir_caminho(caminho):
+            return None
+        self.status.config(text="Diagrama criado em %s" % caminho)
+        if marcar:
+            self.after(150, self.acao_local)
+        return caminho
+
     def acao_nova(self):
         if not self._confirmar_descarte("Nova rede"):
             return
@@ -5370,6 +5959,7 @@ class App(tk.Tk):
         self._refazer.clear()
         self.alteracoes_pendentes = False
         apagar_autosave()
+        self.mostrar_editor()
         self.atualizar_tudo(centralizar=True)
 
     def acao_abrir(self):
@@ -5377,25 +5967,14 @@ class App(tk.Tk):
             return
         caminho = filedialog.askopenfilename(
             title="Abrir rede",
+            initialdir=(self.cidade_atual or {}).get("pasta") or cidades.pasta_provedor() or None,
             filetypes=[("Rede WaspFiber (*%s)" % EXTENSAO, "*%s" % EXTENSAO),
                        ("Rede da versao Nix (*%s)" % EXTENSAO_NIX, "*%s" % EXTENSAO_NIX),
                        ("Arquivos da versao FTTX (*.json)", "*.json"),
                        ("Todos (*.*)", "*.*")])
         if not caminho:
             return
-        try:
-            self.rede = Rede.carregar(caminho)
-        except Exception as erro:
-            messagebox.showerror("Erro ao abrir", str(erro))
-            return
-        self.caminho_atual = caminho
-        self.porta_selecionada = None
-        self.destaque = set()
-        self._historico.clear()
-        self._refazer.clear()
-        self.alteracoes_pendentes = False
-        apagar_autosave()
-        self.atualizar_tudo(centralizar=True)
+        self._abrir_caminho(caminho)
 
     def acao_salvar(self):
         if not self.caminho_atual:
@@ -5411,13 +5990,16 @@ class App(tk.Tk):
         self.atualizar_tudo()
 
     def acao_salvar_como(self):
+        sugestao = cidades.nome_de_pasta(self.rede.local.get("nome")) or "rede"
         caminho = filedialog.asksaveasfilename(
             title="Salvar rede", defaultextension=EXTENSAO,
-            initialfile="rede" + EXTENSAO,
+            initialdir=(self.cidade_atual or {}).get("pasta") or cidades.pasta_provedor() or None,
+            initialfile=sugestao + EXTENSAO,
             filetypes=[("Rede WaspFiber (*%s)" % EXTENSAO, "*%s" % EXTENSAO)])
         if not caminho:
             return
         self.caminho_atual = caminho
+        self.cidade_atual = cidades.cidade_do_arquivo(caminho)
         self.acao_salvar()
 
     def acao_exemplo(self):
@@ -5425,11 +6007,13 @@ class App(tk.Tk):
             return
         self.rede = rede_exemplo()
         self.caminho_atual = None
+        self.cidade_atual = None
         self.porta_selecionada = None
         self.destaque = set()
         self._historico.clear()
         self._refazer.clear()
         self.alteracoes_pendentes = False
+        self.mostrar_editor()
         self.atualizar_tudo(centralizar=True)
 
     def acao_exportar(self):
@@ -5537,6 +6121,9 @@ class App(tk.Tk):
             "\"novo\") ou o que procura na rede (cliente, equipamento, porta) e "
             "aperte Enter. Tudo o que o programa faz esta ali.\n\n"
             "O botao ... no canto de cima tem o menu (abrir, salvar, exportar).\n\n"
+            "INICIO (casinha no topo): as CIDADES e os DIAGRAMAS de cada uma. Cada "
+            "cidade e uma pasta; cada POP, caixa de emenda ou CTO e um diagrama dentro "
+            "dela. Use uma pasta compartilhada no servidor pra equipe toda.\n\n"
             "1. Comece pela rede de exemplo (Ctrl+K > exemplo) pra ver funcionando.\n\n"
             "2. O + da barra lateral cadastra um equipamento (DIO, CABO, acomodador, "
             "OLT, switch, RB); o icone ao lado cria "

@@ -40,6 +40,7 @@ fttx.perguntar_texto = lambda *a, **k: "TESTE"
 
 app = App()
 app.update()
+inicio_ao_abrir = app.tela_inicio.visivel()
 app.acao_exemplo()
 app.update()
 
@@ -585,6 +586,70 @@ checar(res2.get("previa"), "mostra a previa ampliada enquanto o tile carrega")
 checar(res2.get("config_fonte") == "satelite", "lembra a escolha de fonte")
 checar(not any("Chave do Google" in r[1] for r in app.resultados_paleta("chave")),
        "paleta sem chave do Google")
+
+print("== tela inicial (B0.36) ==")
+import waspfiber_cidades as cid
+checar(inicio_ao_abrir, "programa abre na tela das cidades")
+checar(not app.tela_inicio.visivel(), "rede de exemplo sai da tela inicial")
+app.mostrar_inicio()
+app.update()
+checar(app.tela_inicio.visivel() and not app.rede.equipamentos, "casinha volta pro inicio (rede limpa)")
+checar(app.tela_inicio.vazio.winfo_ismapped(), "sem cidades: convite pra cadastrar a primeira")
+app.abrir_paleta()
+checar(app.paleta is None or not app.paleta.winfo_exists(), "Ctrl+K nao abre por cima do inicio")
+prov = tempfile.mkdtemp(prefix="waspfiber_provedor_")
+cid.definir_pasta_provedor(prov)
+cidade = cid.criar_cidade(prov, "Santos", "SP")
+app.tela_inicio.atualizar()
+app.update()
+checar(list(app.tela_inicio.linhas_cidade) == [os.path.normcase(cidade["pasta"])]
+       and not app.tela_inicio.vazio.winfo_ismapped(), "cidade aparece na lista")
+checar(app.tela_inicio.cidade and app.tela_inicio.cidade["titulo"] == "Santos - SP",
+       "primeira cidade ja vem escolhida")
+
+
+class DialogoFalso:
+    def __init__(self, parent, cidade):
+        self.resultado = ("CTO", "CTO Rua A 01", False)
+
+
+_dialogo_original = fttx.DialogNovoDiagrama
+fttx.DialogNovoDiagrama = DialogoFalso
+caminho_cto = app.novo_diagrama(cidade)
+app.update()
+fttx.DialogNovoDiagrama = _dialogo_original
+checar(caminho_cto and os.path.isfile(caminho_cto) and os.path.dirname(caminho_cto) == cidade["pasta"],
+       "novo diagrama e criado (e salvo) na pasta da cidade", caminho_cto)
+checar(not app.tela_inicio.visivel() and app.rede.local["tipo"] == "CTO"
+       and app.rede.local["cidade"] == "Santos - SP", "abre o editor com o local preenchido", app.rede.local)
+checar("Santos - SP" in app.lbl_arquivo.cget("text") and "CTO Rua A 01" in app.lbl_arquivo.cget("text"),
+       "topo mostra cidade > diagrama", app.lbl_arquivo.cget("text"))
+app.rede.add_equipamento("DIO X", fttx.TIPO_DIO, 12)
+app._marcar_alterado()
+app.acao_salvar()
+app.mostrar_inicio()
+app.update()
+linhas = app.tela_inicio.linhas_diagrama
+checar(list(linhas) == [caminho_cto], "volta pro inicio e o diagrama esta na lista")
+checar("1 equipamento" in linhas[caminho_cto].lbl_detalhe.cget("text"),
+       "lista mostra o que foi salvo", linhas[caminho_cto].lbl_detalhe.cget("text"))
+item = cid.listar_diagramas(cidade["pasta"])[0]
+app.tela_inicio._escolher_diagrama(item)
+app.tela_inicio.abrir_escolhido()
+app.update()
+checar(not app.tela_inicio.visivel() and len(app.rede.equipamentos) == 1, "abre o diagrama escolhido")
+salvo = []
+mb.askyesnocancel = lambda *a, **k: None          # "cancelar" no aviso de nao salvo
+app.rede.add_equipamento("DIO Y", fttx.TIPO_DIO, 12)
+app._marcar_alterado()
+app.mostrar_inicio()
+checar(not app.tela_inicio.visivel() and len(app.rede.equipamentos) == 2,
+       "alteracao nao salva: cancelar fica no editor")
+mb.askyesnocancel = lambda *a, **k: False
+app.mostrar_inicio()
+checar(app.tela_inicio.visivel(), "descartar volta pro inicio")
+app.acao_exemplo()
+app.update()
 
 print("== rede vazia ==")
 app.rede = fttx.Rede()
