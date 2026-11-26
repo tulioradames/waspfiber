@@ -16,11 +16,16 @@ _CACHE_ICONES = {}
 _MESTRE = [None]
 
 
+_CACHES = {}
+
+
 def usar_janela(raiz):
-    """As imagens do tkinter pertencem a UMA janela principal. Chamado quando
-    a janela principal nasce: zera o cache e cria as proximas imagens nela."""
+    """As imagens do tkinter pertencem a UMA janela principal. Cada janela
+    principal tem o seu cache (apagar as imagens de uma janela que ainda as
+    usa quebra os botoes dela)."""
+    global _CACHE_ICONES
     _MESTRE[0] = raiz
-    _CACHE_ICONES.clear()
+    _CACHE_ICONES = _CACHES.setdefault(id(raiz), {})
 
 
 def icone(nome, cor="fraco", tamanho=18):
@@ -187,6 +192,7 @@ class MenuSuspenso:
     def __init__(self, ancora, tema, itens, alinhar="esquerda"):
         self.ancora, self.tema, self.itens, self.alinhar = ancora, tema, itens, alinhar
         self.janela = None
+        self._posicao = None
         self.raiz = ancora.winfo_toplevel()
         self.raiz.bind_all("<ButtonPress-1>", self._clique_fora, add="+")
 
@@ -196,9 +202,19 @@ class MenuSuspenso:
     def _clique_fora(self, evento):
         if self.janela is None:
             return
-        if dentro_de(evento.widget, self.janela) or dentro_de(evento.widget, self.ancora):
-            return                      # clique no proprio menu ou no botao que abre
+        if dentro_de(evento.widget, self.janela):
+            return                      # clique no proprio menu
+        if self._posicao is None and dentro_de(evento.widget, self.ancora):
+            return                      # clique no botao que abre (ele mesmo alterna)
         self.fechar()
+
+    def abrir_em(self, x_raiz, y_raiz, itens=None):
+        """Menu de contexto: abre onde o mouse esta (botao direito)."""
+        self.fechar()
+        if itens is not None:
+            self.itens = itens
+        self._posicao = (x_raiz, y_raiz)
+        self.abrir()
 
     def abrir(self):
         if self.janela is not None:
@@ -220,7 +236,7 @@ class MenuSuspenso:
                            bg=t["ui_painel"], width=26)
             img.pack(side="left", padx=(4, 2), pady=5)
             rot = tk.Label(linha, text=texto, bg=t["ui_painel"], fg=t["ui_texto"],
-                           anchor="w", width=26, font=("TkDefaultFont", 9))
+                           anchor="w", width=34, font=("TkDefaultFont", 9))
             rot.pack(side="left")
             ata = tk.Label(linha, text=atalho or "", bg=t["ui_painel"],
                            fg=t["ui_texto_fraco"], font=("TkDefaultFont", 8), width=8,
@@ -247,9 +263,14 @@ class MenuSuspenso:
                 parte.bind("<Leave>", sair)
                 parte.bind("<ButtonRelease-1>", clicar)
         self.janela.update_idletasks()
-        x = self.ancora.winfo_rootx() - self.raiz.winfo_rootx()
-        y = self.ancora.winfo_rooty() - self.raiz.winfo_rooty() + self.ancora.winfo_height() + 4
-        if self.alinhar == "direita":
+        if self._posicao is not None:
+            x = self._posicao[0] - self.raiz.winfo_rootx() + 2
+            y = self._posicao[1] - self.raiz.winfo_rooty() + 2
+            y = max(4, min(y, self.raiz.winfo_height() - self.janela.winfo_reqheight() - 4))
+        else:
+            x = self.ancora.winfo_rootx() - self.raiz.winfo_rootx()
+            y = self.ancora.winfo_rooty() - self.raiz.winfo_rooty() + self.ancora.winfo_height() + 4
+        if self.alinhar == "direita" and self._posicao is None:
             x = x + self.ancora.winfo_width() - self.janela.winfo_reqwidth()
         x = max(4, min(x, self.raiz.winfo_width() - self.janela.winfo_reqwidth() - 4))
         self.janela.place(x=x, y=y)
@@ -265,6 +286,7 @@ class MenuSuspenso:
         if self.janela is not None:
             self.janela.destroy()
             self.janela = None
+        self._posicao = None
 
 
 def rolagem_automatica(barra):

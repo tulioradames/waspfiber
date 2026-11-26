@@ -1,8 +1,13 @@
 """Testa modelo, rastreio, busca, lote, layout, pendencias e exportacoes
 sem abrir janela nenhuma.  Rodar:  python teste_core.py"""
 import os
+import tempfile
 import time
 from waspfiber import *
+import waspfiber_mapa as mapa
+
+# pasta temporaria propria (antes era fixa no ambiente onde o programa nasceu)
+PASTA_TESTE = tempfile.mkdtemp(prefix="waspfiber_teste_").replace("\\", "/")
 
 FALHAS = []
 
@@ -214,8 +219,8 @@ r_ex = rede_exemplo()
 c2 = r_ex.equipamentos["CABO-02"]
 checar(c2.pos_x < r_ex.equipamentos["ACOMO-01"].pos_x,
        "cabo de cliente fica do lado dos clientes (antes da CTO)")
-r_ex.salvar(__import__("tempfile").gettempdir() + "/t_real.json")
-volta = Rede.carregar(__import__("tempfile").gettempdir() + "/t_real.json")
+r_ex.salvar(PASTA_TESTE + "/t_real.json")
+volta = Rede.carregar(PASTA_TESTE + "/t_real.json")
 checar(volta.equipamentos["CABO-01"].fibras_por_tubo == 12 and len(volta.fusoes) == 25
        and volta.equipamentos["CABO-02"].pos_x == c2.pos_x,
        "salvar/abrir guarda cabo, lados e posicoes")
@@ -223,7 +228,7 @@ checar(volta.equipamentos["CABO-01"].fibras_por_tubo == 12 and len(volta.fusoes)
 print("== nome novo: WaspFiber (B0.30) ==")
 checar(APP_NOME == "WaspFiber" and EXTENSAO == ".wasp.json", "nome e extensao novos")
 import json as _json
-caminho_nix = __import__("tempfile").gettempdir() + "/rede_velha.nix.json"
+caminho_nix = PASTA_TESTE + "/rede_velha.nix.json"
 rede_exemplo().salvar(caminho_nix)
 checar(len(Rede.carregar(caminho_nix).equipamentos) == 7, "rede .nix.json da versao Nix continua abrindo")
 checar(pasta_do_programa().endswith("WaspFiber") and
@@ -288,6 +293,35 @@ linhas = linhas_relatorio(y)
 checar(any(l[3] == "LC/UPC dx" for l in linhas) and any(l[3] == "fusao" for l in linhas),
        "relatorio mostra o conector de cada porta")
 
+print("== potencia na porta da OLT (B0.33) ==")
+rp = rede_exemplo()
+calc = calcular_potencias(rp)
+fonte = ("OLT-01", "OLT-01-PLACA-01", 5)
+checar(calc["fontes"].get(fonte) == 5.0, "exemplo tem +5 dBm na PON 4")
+cliente = calc["portas"].get(("CABO-02", "A", 1))
+checar(cliente is not None and abs(cliente - (5.0 - 11.4)) < 0.01,
+       "potencia chega no cliente: 5 - 11,4 = -6,4 dBm", cliente)
+checar(abs(calc["portas"][("ACOMO-01", "ACOMO-01-SPLIT-01", 8)] - (5.0 - 0.1 - 0.5 - 0.1 - 0.1 - 10.5)) < 0.01,
+       "saida livre do splitter tambem mostra o sinal disponivel")
+f_pon = [f.id for f in rp.fusoes.values() if f.rotulo == "PON 4"][0]
+checar(abs(calc["fusoes"][f_pon] - 4.9) < 0.01, "a fibra/cordao guarda o dBm que passa nela")
+checar(("SW-01", "SW-01-GRP-01", 1) not in calc["portas"], "o que nao esta no caminho nao ganha valor")
+rp.definir_potencia("OLT-01", "OLT-01-PLACA-01", 5, -20.0)
+pior = calcular_potencias(rp)["portas"][("CABO-02", "A", 1)]
+checar(classificar_potencia(pior) == "critico", "potencia baixa vira critico no cliente", pior)
+bloqueia(lambda: rp.definir_potencia("DIO-01", "F", 1, 3.0), "DIO nao tem potencia de saida")
+bloqueia(lambda: rp.definir_potencia("OLT-01", "OLT-01-PLACA-01", 1, 99), "potencia fora da faixa")
+rp.definir_potencia("OLT-01", "OLT-01-PLACA-01", 5, 3.5)
+volta = Rede.from_dict(json.loads(json.dumps(rp.to_dict())))
+checar(volta.potencia_da_porta("OLT-01", "OLT-01-PLACA-01", 5) == 3.5, "salvar/abrir guarda a potencia")
+rp.definir_potencia("OLT-01", "OLT-01-PLACA-01", 5, None)
+rp.definir_potencia("OLT-01", "OLT-01-PLACA-01", 3, None)
+checar(calcular_potencias(rp)["fontes"] == {}, "tirar a potencia limpa o calculo")
+cp = montar_cena(rede_exemplo(), potencias=calcular_potencias(rede_exemplo()))
+checar(any(it["t"] == "texto" and "dBm" in it["s"] for it in cp.itens),
+       "diagrama mostra os valores em dBm")
+checar(formatar_dbm(-6.4) == "-6,4 dBm" and formatar_dbm(5) == "+5,0 dBm", "formato com virgula")
+
 print("== pendencias (novo) ==")
 p = Rede()
 dio = p.add_equipamento("DIO Teste", TIPO_DIO, 4)
@@ -318,7 +352,7 @@ total_livres = sum(c["livres"] for c in cap)
 checar(total_livres == sum(c["total"] - c["usadas"] for c in cap), "contas de capacidade batem")
 
 print("== exportacoes ==")
-pasta = __import__("tempfile").gettempdir() + ""
+pasta = PASTA_TESTE
 r2 = rede_exemplo()
 cena2 = montar_cena(r2)
 exportar_svg(cena2, pasta + "/t_diagrama.svg")
@@ -347,6 +381,65 @@ checar(len(r3.fusoes_na_porta("DIO-01", None, 3)) == 1, "indice reconstruido ao 
 checar(gravar_autosave(r2, "x.json") and ler_autosave()[0] is not None, "autosave")
 apagar_autosave()
 checar(ler_autosave()[0] is None, "autosave apagado")
+
+print("== localizacao (B0.34) ==")
+lc = mapa.ler_coordenada
+checar(lc("-23.550520, -46.633308") == (-23.55052, -46.633308), "coordenada decimal com ponto")
+checar(lc("-23.550520 -46.633308") == (-23.55052, -46.633308), "separada por espaco")
+checar(lc("-23,550520 -46,633308") == (-23.55052, -46.633308), "virgula decimal (pt-BR)")
+checar(lc("-23,55; -46,63") == (-23.55, -46.63), "virgula decimal com ponto e virgula")
+checar(lc("https://www.google.com/maps/@-23.5505199,-46.6333094,17z") == (-23.5505199, -46.6333094),
+       "link do Google Maps (@)")
+checar(lc("https://www.google.com/maps/place/Pra%C3%A7a+da+S%C3%A9/@-23.55,-46.64,17z/"
+          "data=!3m1!4b1!4m6!3m5!1s0x0:0x0!8m2!3d-23.5505199!4d-46.6333094") == (-23.5505199, -46.6333094),
+       "link do Google Maps (!3d!4d vale mais que o centro)")
+checar(lc("https://maps.google.com/?q=-23.55,-46.63") == (-23.55, -46.63), "link com ?q=")
+ponto = lc("23°33'01.9\"S 46°38'00.0\"W")
+checar(ponto and abs(ponto[0] + 23.550528) < 1e-5 and abs(ponto[1] + 46.633333) < 1e-5,
+       "graus/minutos/segundos do Google Earth", ponto)
+ponto = lc("23 33 1.9 S 46 38 0 O")
+checar(ponto and ponto[0] < 0 and ponto[1] < 0, "DMS sem simbolos e O de oeste", ponto)
+checar(lc("23.5505 S 46.6333 W") == (-23.5505, -46.6333), "graus decimais com hemisferio")
+checar(lc("abc") is None and lc("") is None and lc("123, 456") is None, "texto invalido / fora do mundo")
+checar(mapa.formatar_dms(-23.550528, -46.633333) == "23°33'01.9\"S  46°38'00.0\"W",
+       "formata em graus/minutos/segundos", mapa.formatar_dms(-23.550528, -46.633333))
+ida = mapa.ler_coordenada(mapa.formatar_dms(-12.9714, -38.5014))
+checar(ida and abs(ida[0] + 12.9714) < 1e-4 and abs(ida[1] + 38.5014) < 1e-4, "DMS vai e volta")
+checar("query=-23.5505200,-46.6333080" in mapa.link_google_maps(-23.55052, -46.633308),
+       "link do Google Maps")
+checar(mapa.link_google_earth(-23.55052, -46.633308).startswith(
+       "https://earth.google.com/web/@-23.5505200,-46.6333080,"), "link do Google Earth")
+px = mapa.latlon_para_pixel(-23.55052, -46.633308, 17)
+volta = mapa.pixel_para_latlon(px[0], px[1], 17)
+checar(abs(volta[0] + 23.55052) < 1e-7 and abs(volta[1] + 46.633308) < 1e-7, "projecao vai e volta")
+checar(mapa.bbox_do_tile(0, 0, 0).startswith("-20037508.343,-20037508.343"), "recorte do tile 0/0/0")
+checar(mapa.url_do_tile("mapa", 15, 12139, 18603) ==
+       "https://tile.openstreetmap.org/15/12139/18603.png", "url do tile de ruas")
+checar("format=png" in mapa.url_do_tile("satelite", 15, 12139, 18603), "satelite pedido em PNG")
+
+rl = rede_exemplo()
+checar(rl.local["tipo"] == "POP" and rl.local["lat"] is not None, "rede de exemplo tem local")
+rl.definir_local({"tipo": "CTO", "nome": "CTO-Bairro-01", "lat": "-23.5", "lon": -46.6,
+                  "endereco": " Rua A, 10 ", "cidade": "Santos - SP"})
+volta = Rede.from_dict(json.loads(json.dumps(rl.to_dict())))
+checar(volta.local == rl.local and volta.local["lat"] == -23.5 and volta.local["endereco"] == "Rua A, 10",
+       "local salvo e aberto de novo", volta.local)
+antiga = rl.to_dict()
+del antiga["local"]
+checar(Rede.from_dict(antiga).local == mapa.local_vazio(), "rede antiga (sem local) abre sem local")
+checar(mapa.normalizar_local({"tipo": "XYZ", "lat": 200, "lon": 0})["lat"] is None
+       and mapa.normalizar_local({"tipo": "XYZ"})["tipo"] == "", "local invalido e limpo")
+checar(not mapa.local_preenchido(None) and mapa.local_preenchido({"nome": "x"}), "local preenchido?")
+checar(mapa.resumo_local(rl.local) == "CTO  ·  CTO-Bairro-01  ·  Santos - SP  ·  -23.500000, -46.600000",
+       "resumo do local", mapa.resumo_local(rl.local))
+pdf_local = os.path.join(PASTA_TESTE, "local.svg")
+exportar_svg(montar_cena(rl), pdf_local)
+checar("CTO-BAIRRO-01" in open(pdf_local, encoding="utf-8").read(), "cabecalho do diagrama mostra o local")
+vista_pasta = os.path.join(PASTA_TESTE, "vista")
+mapa.gravar_ultima_vista(-10.0, -40.0, 12, pasta=vista_pasta)
+checar(mapa.ler_ultima_vista(pasta=vista_pasta) == (-10.0, -40.0, 12), "mapa lembra a ultima vista")
+checar(mapa.ler_ultima_vista(pasta=os.path.join(PASTA_TESTE, "nada")) == mapa.VISTA_PADRAO,
+       "sem vista guardada abre no Brasil")
 
 print("== limites ==")
 montar_cena(Rede())

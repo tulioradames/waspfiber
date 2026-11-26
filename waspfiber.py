@@ -27,9 +27,10 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import waspfiber_ui as nix_ui   # icones, botoes, menus e cartoes da interface
+import waspfiber_mapa as mapa   # localizacao do diagrama (B0.34)
 
 APP_NOME = "WaspFiber"
-VERSAO = "B0.32"
+VERSAO = "B0.34"
 EXTENSAO = ".wasp.json"
 EXTENSAO_NIX = ".nix.json"      # redes salvas quando o programa se chamava Nix
 
@@ -123,18 +124,23 @@ TIPOS_GRUPO_ATIVO = {
 class Porta:
     """Uma porta dentro de um modulo. Portas de DIO nao usam esta classe."""
 
-    def __init__(self, numero, tipo_gbic=SIMPLEX, conector=None, polimento=None):
+    def __init__(self, numero, tipo_gbic=SIMPLEX, conector=None, polimento=None,
+                 potencia=None):
         self.numero = numero
         self.tipo_gbic = tipo_gbic
         self.conector = conector
         self.polimento = polimento
+        self.potencia = potencia       # dBm de saida (porta de OLT), ou None
 
     def limite(self):
         return 1 if self.tipo_gbic == SIMPLEX else 2
 
     def to_dict(self):
-        return {"numero": self.numero, "tipo_gbic": self.tipo_gbic,
-                "conector": self.conector, "polimento": self.polimento}
+        d = {"numero": self.numero, "tipo_gbic": self.tipo_gbic,
+             "conector": self.conector, "polimento": self.polimento}
+        if self.potencia is not None:
+            d["potencia"] = self.potencia
+        return d
 
 
 class Modulo:
@@ -171,7 +177,7 @@ class Modulo:
     def from_dict(d):
         m = Modulo(d["id"], d["nome"], d["tipo"], 0, d.get("gbic_fixo"))
         m.portas = {int(k): Porta(v["numero"], v.get("tipo_gbic", SIMPLEX),
-                                  v.get("conector"), v.get("polimento"))
+                                  v.get("conector"), v.get("polimento"), v.get("potencia"))
                     for k, v in d.get("portas", {}).items()}
         return m
 
@@ -399,6 +405,12 @@ class Rede:
         # indice (eq_id, modulo_id, porta) -> fusoes, pra nao varrer a lista
         # inteira a cada consulta (o diagrama consulta porta por porta)
         self._indice = {}
+        # B0.34: o local do campo a que este diagrama pertence (POP, caixa de
+        # emenda ou CTO) - tipo, nome, endereco, cidade, lat/lon, observacao
+        self.local = mapa.local_vazio()
+
+    def definir_local(self, dados):
+        self.local = mapa.normalizar_local(dados)
 
     # ---------------- indice de ocupacao ----------------
     def reindexar(self):
@@ -793,6 +805,29 @@ class Rede:
             mudou += antes != (porta.conector, porta.polimento)
         return mudou
 
+    def potencia_da_porta(self, eq_id, modulo_id, porta_num):
+        eq = self.equipamentos.get(eq_id)
+        if eq is None or eq.tipo not in TIPOS_ATIVOS:
+            return None
+        mod = eq.modulos.get(modulo_id)
+        porta = mod.portas.get(porta_num) if mod else None
+        return porta.potencia if porta else None
+
+    def definir_potencia(self, eq_id, modulo_id, porta_num, dbm):
+        """Potencia de saida (dBm) de uma porta de OLT/ativo; None tira."""
+        eq = self.equipamentos[eq_id]
+        if eq.tipo not in TIPOS_ATIVOS:
+            raise ValueError("So porta de OLT, switch ou RB tem potencia de saida.")
+        if dbm is not None:
+            dbm = float(dbm)
+            if not -40.0 <= dbm <= 30.0:
+                raise ValueError("Potencia fora da faixa: use de -40 a +30 dBm.")
+        eq.modulos[modulo_id].portas[porta_num].potencia = dbm
+
+    def definir_potencia_em_lote(self, eq_id, modulo_id, dbm):
+        for n in self.equipamentos[eq_id].modulos[modulo_id].portas:
+            self.definir_potencia(eq_id, modulo_id, n, dbm)
+
     def definir_tipo_porta(self, eq_id, modulo_id, porta_num, tipo_gbic):
         eq = self.equipamentos[eq_id]
         if eq.is_cabo():
@@ -896,6 +931,7 @@ class Rede:
     # ---------------- persistencia ----------------
     def to_dict(self):
         return {"versao": VERSAO,
+                "local": dict(self.local),
                 "equipamentos": [e.to_dict() for e in self.equipamentos.values()],
                 "fusoes": [f.to_dict() for f in self.fusoes.values()],
                 "_contador": self._contador,
@@ -905,6 +941,7 @@ class Rede:
     @staticmethod
     def from_dict(d):
         r = Rede()
+        r.local = mapa.normalizar_local(d.get("local"))
         for ed in d.get("equipamentos", []):
             eq = Equipamento.from_dict(ed)
             r.equipamentos[eq.id] = eq
@@ -1291,6 +1328,40 @@ def rastrear_caminho(rede, chave, potencia_dbm=5.0):
     return raiz
 
 
+def calcular_potencias(rede):
+    """Pra cada porta de OLT com potencia informada, percorre o caminho e
+    anota a potencia que chega em cada porta e em cada fibra. Se dois
+    caminhos chegam no mesmo ponto, vale o mais forte.
+    Devolve {"portas": {chave: dBm}, "fusoes": {id: dBm}, "fontes": {chave: dBm}}."""
+    portas, fusoes, fontes = {}, {}, {}
+    for eq in rede.equipamentos.values():
+        if eq.tipo not in TIPOS_ATIVOS:
+            continue
+        for mod in eq.modulos.values():
+            for n, porta in mod.portas.items():
+                if porta.potencia is None:
+                    continue
+                chave = (eq.id, mod.id, n)
+                fontes[chave] = porta.potencia
+                pilha = [rastrear_caminho(rede, chave, porta.potencia)]
+                while pilha:
+                    no = pilha.pop()
+                    dbm = no["potencia"]
+                    if dbm is not None:
+                        if dbm > portas.get(no["chave"], -999.0):
+                            portas[no["chave"]] = dbm
+                        fid = no.get("fusao_id")
+                        if fid and dbm > fusoes.get(fid, -999.0):
+                            fusoes[fid] = dbm
+                    pilha.extend(no["filhos"])
+    return {"portas": portas, "fusoes": fusoes, "fontes": fontes}
+
+
+def formatar_dbm(dbm):
+    """-6.4 -> '-6,4 dBm' (virgula, como se escreve aqui)."""
+    return ("%+.1f dBm" % dbm).replace(".", ",")
+
+
 def pontas_finais(no, acumulado=None):
     """Lista as pontas onde o caminho termina (as folhas da arvore)."""
     acumulado = [] if acumulado is None else acumulado
@@ -1543,6 +1614,7 @@ class Cena:
 
     def __init__(self, tema=None):
         self.itens = []        # dicts: ret | linha | texto | oval
+        self.potencias = None  # dBm calculados (camada de potencia), se houver
         self.portas = {}       # (eq,mod,num) -> {"x","y","lado"}
         self.titulos = {}      # eq_id -> {"x0","y0","x1","y1"}
         self.tema = tema or TEMA
@@ -1743,6 +1815,25 @@ def _tipo_do_modulo(rede, eq, mod):
         if c:
             return "  ·  %s/%s" % (c, p)
     return "  ·  conectores mistos" if len(tipos) > 1 else ""
+
+
+def _desenhar_potencias(cena, rede, potencias):
+    """Valor em dBm do lado de fora de cada porta por onde o sinal passa
+    (abaixo da linha, pra nao brigar com o numero da porta)."""
+    t = cena.tema
+    for chave, dbm in potencias["portas"].items():
+        p = cena.portas.get(chave)
+        if p is None:
+            continue
+        fora = 1.0 if p["lado"] == "direita" else -1.0
+        fonte = chave in potencias["fontes"]
+        texto = ("TX " if fonte else "") + formatar_dbm(dbm)
+        cor = t["ui_acento"] if fonte else cor_nivel(t, dbm)
+        x = p["ax"] + fora * 9.0
+        y = p["ay"] + (6.5 if not fonte else -6.0)
+        cena.ret(x - (0 if fora > 0 else 1) * (len(texto) * 3.6) - 1, y - 4, len(texto) * 3.6 + 2,
+                 8, fill=t["fundo"], outline=None)
+        cena.texto(x, y, texto, 5.8, cor, "w" if fora > 0 else "e", True)
 
 
 def cor_polimento(t, polimento, padrao=None):
@@ -2115,8 +2206,14 @@ def _subtitulo(rede, eq):
     return eq.tipo
 
 
+def cor_nivel(t, dbm):
+    """Verde / laranja / vermelho pela potencia que chega (faixas do GPON)."""
+    return {"ok": t["uso"], "alerta": t["ui_aviso"], "critico": t["ui_erro"]}[
+        classificar_potencia(dbm)]
+
+
 def montar_cena(rede, selecionado=None, com_legenda=True, destaque=None, tema=None,
-                selecao_lote=None):
+                selecao_lote=None, potencias=None):
     """Constroi a cena completa do diagrama a partir da rede.
     destaque: ids de fusoes pra desenhar realcadas (usado pelo rastreio).
     tema: usa o tema ativo do programa se nao for informado."""
@@ -2176,6 +2273,10 @@ def montar_cena(rede, selecionado=None, com_legenda=True, destaque=None, tema=No
             por_cima += cena.itens[n:]
             del cena.itens[n:]
         else:
+            if potencias and f.id in potencias["fusoes"]:
+                # fibra com sinal: contorno na cor do nivel, a cor da fibra por cima
+                cena.linha(pts, cor_nivel(t, potencias["fusoes"][f.id]), 4.6, None,
+                           tags=("fusao:%s" % f.id,))
             cena.linha(pts, cor, 1.7, dash, tags=("fusao:%s" % f.id,))
         if f.rotulo:
             meio = pts[len(pts) // 2]
@@ -2189,6 +2290,9 @@ def montar_cena(rede, selecionado=None, com_legenda=True, destaque=None, tema=No
     cena.itens = cena.itens + itens_equipamentos + por_cima
 
     _desenhar_conexoes(cena, rede)
+    cena.potencias = potencias
+    if potencias:
+        _desenhar_potencias(cena, rede, potencias)
 
     # portas marcadas com Shift (fusao em lote)
     for chave in (selecao_lote or ()):
@@ -2210,6 +2314,13 @@ def montar_cena(rede, selecionado=None, com_legenda=True, destaque=None, tema=No
                    t["cabecalho_cor"], "w", True)
         cena.texto(cena.minx + 40, topo + 40,
                    "DIAGRAMA DE FUSOES   ·   " + VERSAO, 6.8, t["tipo_cor"], "w")
+        local = getattr(rede, "local", None)
+        if mapa.local_preenchido(local):
+            linha_local = mapa.resumo_local(local)
+            if local.get("endereco"):
+                linha_local += "   ·   " + local["endereco"]
+            cena.texto(cena.minx + 40, topo + 55, linha_local.upper(), 6.8,
+                       t["cabecalho_cor"], "w")
         conta = lambda cond: len([e for e in rede.equipamentos.values() if cond(e)])
         usadas = sum(rede.ocupacao(e)[0] for e in rede.equipamentos.values() if not e.is_cabo())
         total = sum(rede.ocupacao(e)[1] for e in rede.equipamentos.values() if not e.is_cabo())
@@ -2227,6 +2338,14 @@ def montar_cena(rede, selecionado=None, com_legenda=True, destaque=None, tema=No
             cena.ret(lx - 34, topo + 42, 8, 8, fill=cor, outline=None)
             lx -= 56
         cena.texto(lx, topo + 46, "POLIMENTO", 6.0, t["tipo_cor"], "e")
+        if potencias and potencias["fontes"]:
+            lx -= 80
+            for rotulo, cor in (("< -28 CRITICO", t["ui_erro"]), ("< -25 ALERTA", t["ui_aviso"]),
+                                ("OK", t["uso"])):
+                cena.texto(lx, topo + 46, rotulo, 6.0, t["tipo_cor"], "e")
+                cena.ret(lx - len(rotulo) * 4.8 - 14, topo + 42, 8, 8, fill=cor, outline=None)
+                lx -= len(rotulo) * 4.8 + 34
+            cena.texto(lx, topo + 46, "SINAL (dBm)", 6.0, t["tipo_cor"], "e")
         cena.calcular_limites()
     cena.pintar_fundo()
     return cena
@@ -2720,6 +2839,8 @@ def rede_exemplo():
     # central: OLT -> frente do DIO (cordoes)
     r.criar_fusao(olt.id, gpon.id, 5, dio1.id, "F", 5, "PON 4")
     r.criar_fusao(olt.id, gpon.id, 3, dio1.id, "F", 3, "PON 2")
+    r.definir_potencia(olt.id, gpon.id, 5, 5.0)      # SFP GPON classe C+: +5 dBm
+    r.definir_potencia(olt.id, gpon.id, 3, 5.0)
     r.criar_fusao(olt.id, ctrl.id, 1, dio1.id, "F", 10, "Uplink mgmt")
     r.definir_tipo_porta(olt.id, ctrl.id, 2, DUPLEX)
     r.criar_fusao(olt.id, ctrl.id, 2, dio1.id, "F", 11, "TX")
@@ -2739,6 +2860,9 @@ def rede_exemplo():
     r.criar_fusao(cto.id, sp.id, 2, c2.id, "B", 1, "Cliente A")
     r.criar_fusao(cto.id, sp.id, 3, c2.id, "B", 2, "Cliente B")
     r.organizar_layout()
+    r.definir_local({"tipo": "POP", "nome": "POP Centro", "cidade": "Sao Paulo - SP",
+                     "endereco": "Praca da Se", "lat": -23.550520, "lon": -46.633308,
+                     "obs": "Rede de exemplo"})
     return r
 
 
@@ -3282,6 +3406,19 @@ class DialogPorta(DialogoBase):
                                                           sticky="w", padx=4)
             self._ajustar_sc()
             linha += 1
+        if eq.tipo in TIPOS_ATIVOS:
+            quadro_p = ttk.LabelFrame(master, text="Potencia de saida (dBm)")
+            quadro_p.grid(row=linha, column=0, columnspan=3, sticky="ew", pady=4)
+            self.e_pot = ttk.Entry(quadro_p, width=10)
+            atual = self.rede.potencia_da_porta(self.eq_id, self.modulo_id, self.porta_num)
+            if atual is not None:
+                self.e_pot.insert(0, ("%g" % atual).replace(".", ","))
+            self.e_pot.pack(side="left", padx=4, pady=4)
+            ttk.Button(quadro_p, text="Aplicar", command=self._salvar_potencia).pack(
+                side="left", padx=4)
+            ttk.Label(quadro_p, text="vazio = sem potencia. O caminho aparece marcado no "
+                                     "diagrama.", style="Fraco.TLabel").pack(side="left", padx=6)
+            linha += 1
 
         quadro_f = ttk.LabelFrame(master, text="Fusoes desta porta")
         quadro_f.grid(row=linha, column=0, columnspan=3, sticky="ew", pady=4)
@@ -3371,6 +3508,17 @@ class DialogPorta(DialogoBase):
         if not self._fusoes:
             self.lista.insert(tk.END, "(nenhuma fusao - limite desta porta: %d)" % limite)
 
+    def _salvar_potencia(self):
+        texto = self.e_pot.get().strip().replace(",", ".").replace("+", "").replace("dBm", "")
+        try:
+            self.rede.definir_potencia(self.eq_id, self.modulo_id, self.porta_num,
+                                       float(texto) if texto.strip() else None)
+        except ValueError as erro:
+            messagebox.showerror("Potencia invalida", str(erro) if "faixa" in str(erro)
+                                 else "Digite so o numero em dBm, ex.: 5 ou -1,5.")
+            return
+        self.ao_mudar()
+
     def _porta_conector(self):
         eq = self.rede.equipamentos[self.eq_id]
         return eq.modulos["F" if eq.is_dio() else self.modulo_id].portas[self.porta_num]
@@ -3448,6 +3596,279 @@ class DialogPorta(DialogoBase):
         self.ao_rastrear(chave)
 
 
+def em_segundo_plano(janela, funcao, ao_terminar):
+    """Roda funcao() numa thread (internet nao pode travar a janela) e chama
+    ao_terminar(resultado, erro) de volta na thread da interface."""
+    import threading
+    caixa = {}
+
+    def rodar():
+        try:
+            caixa["resultado"] = funcao()
+        except Exception as erro:
+            caixa["erro"] = erro
+
+    fio = threading.Thread(target=rodar, daemon=True)
+    fio.start()
+
+    def conferir():
+        if fio.is_alive():
+            janela.after(80, conferir)
+            return
+        try:
+            if janela.winfo_exists():
+                ao_terminar(caixa.get("resultado"), caixa.get("erro"))
+        except tk.TclError:
+            pass
+    janela.after(80, conferir)
+
+
+class DialogLocal(DialogoBase):
+    """Localizacao do diagrama (B0.34): o diagrama pertence a um local do
+    campo - POP, caixa de emenda ou CTO. Ficha do local a esquerda e o mapa a
+    direita: clique no mapa marca o ponto; colar a coordenada (ou o link do
+    Google Maps) tambem marca. Google Maps / Earth abrem no navegador."""
+
+    def __init__(self, parent, local, baixador=None):
+        self.local = mapa.normalizar_local(local)
+        self.baixador = baixador
+        self.resultado = None
+        self._resultados_busca = []
+        super().__init__(parent, "Localizacao do diagrama")
+
+    # ---------------- montagem ----------------
+    def body(self, master):
+        t = TEMA
+        ficha = ttk.Frame(master)
+        ficha.grid(row=0, column=0, sticky="nsw", padx=(0, 14))
+        linha = 0
+
+        def rotulo(texto):
+            nonlocal linha
+            ttk.Label(ficha, text=texto).grid(row=linha, column=0, sticky="w", pady=(6, 1))
+            linha += 1
+
+        rotulo("Este diagrama e de um:")
+        self.var_tipo = tk.StringVar(value=mapa.ROTULO_TIPO_LOCAL.get(self.local["tipo"], ""))
+        ttk.Combobox(ficha, textvariable=self.var_tipo, state="readonly", width=34,
+                     values=[r for _, r in mapa.TIPOS_LOCAL]).grid(row=linha, column=0,
+                                                                   sticky="we")
+        linha += 1
+
+        rotulo("Nome / identificacao do local:")
+        self.e_nome = ttk.Entry(ficha, width=36)
+        self.e_nome.insert(0, self.local["nome"])
+        self.e_nome.grid(row=linha, column=0, sticky="we")
+        linha += 1
+
+        rotulo("Endereco (Enter procura no mapa):")
+        caixa_end = ttk.Frame(ficha)
+        caixa_end.grid(row=linha, column=0, sticky="we")
+        self.e_endereco = ttk.Entry(caixa_end, width=27)
+        self.e_endereco.insert(0, self.local["endereco"])
+        self.e_endereco.pack(side="left", fill="x", expand=True)
+        self.e_endereco.bind("<Return>", lambda _e: (self._buscar(), "break")[1])
+        ttk.Button(caixa_end, text="Procurar", width=9,
+                   command=self._buscar).pack(side="left", padx=(4, 0))
+        linha += 1
+        # resultados da busca (aparece so quando ha mais de um)
+        self.lista_busca = tk.Listbox(ficha, height=4, activestyle="none", bd=0,
+                                      highlightthickness=1, bg=t["ui_painel"],
+                                      fg=t["ui_texto"], selectbackground=t["ui_acento"],
+                                      selectforeground=t["ui_acento_texto"],
+                                      highlightbackground=t["ui_borda"])
+        self.lista_busca.bind("<<ListboxSelect>>", self._escolher_busca)
+        self._linha_lista = linha
+        linha += 1
+
+        rotulo("Cidade:")
+        self.e_cidade = ttk.Entry(ficha, width=36)
+        self.e_cidade.insert(0, self.local["cidade"])
+        self.e_cidade.grid(row=linha, column=0, sticky="we")
+        linha += 1
+
+        rotulo("Coordenada (cole do Google Maps ou Earth):")
+        self.var_coord = tk.StringVar(
+            value="" if self.local["lat"] is None
+            else mapa.formatar_coordenada(self.local["lat"], self.local["lon"]))
+        self.e_coord = ttk.Entry(ficha, width=36, textvariable=self.var_coord)
+        self.e_coord.grid(row=linha, column=0, sticky="we")
+        self.e_coord.bind("<Return>", lambda _e: (self._ler_coord(centralizar=True), "break")[1])
+        self.var_coord.trace_add("write", lambda *_: self._ler_coord())
+        linha += 1
+        self.lbl_coord = ttk.Label(ficha, text="", style="Fraco.TLabel", wraplength=280)
+        self.lbl_coord.grid(row=linha, column=0, sticky="w", pady=(2, 0))
+        linha += 1
+
+        rotulo("Observacao:")
+        self.t_obs = tk.Text(ficha, width=36, height=3, wrap="word", bd=0,
+                             bg=t["ui_painel"], fg=t["ui_texto"], insertbackground=t["ui_texto"],
+                             highlightthickness=1, highlightbackground=t["ui_borda"],
+                             font=("TkDefaultFont", 9))
+        self.t_obs.insert("1.0", self.local["obs"])
+        self.t_obs.grid(row=linha, column=0, sticky="we")
+        linha += 1
+
+        acoes = ttk.Frame(ficha)
+        acoes.grid(row=linha, column=0, sticky="we", pady=(12, 0))
+        self.bt_maps = ttk.Button(acoes, text="Abrir no Google Maps",
+                                  command=lambda: self._abrir(mapa.link_google_maps))
+        self.bt_maps.pack(fill="x", pady=2)
+        self.bt_earth = ttk.Button(acoes, text="Abrir no Google Earth",
+                                   command=lambda: self._abrir(mapa.link_google_earth))
+        self.bt_earth.pack(fill="x", pady=2)
+        self.bt_endereco = ttk.Button(acoes, text="Preencher endereco pelo ponto",
+                                      command=self._endereco_do_ponto)
+        self.bt_endereco.pack(fill="x", pady=2)
+        ttk.Button(acoes, text="Limpar coordenada", command=self._limpar).pack(fill="x", pady=2)
+        linha += 1
+        self.lbl_status = ttk.Label(ficha, text="", style="Fraco.TLabel", wraplength=280)
+        self.lbl_status.grid(row=linha, column=0, sticky="w", pady=(8, 0))
+
+        # ----- mapa -----
+        lado = ttk.Frame(master)
+        lado.grid(row=0, column=1, sticky="nsew")
+        topo = ttk.Frame(lado)
+        topo.pack(fill="x", pady=(0, 6))
+        ttk.Label(topo, text="Clique no mapa para marcar o local. Arraste para mover, "
+                             "roda do mouse para zoom.", style="Fraco.TLabel").pack(side="left")
+        self.var_fonte = tk.StringVar(value="mapa")
+        for chave in ("satelite", "mapa"):
+            ttk.Radiobutton(topo, text=mapa.FONTES[chave]["rotulo"], value=chave,
+                            variable=self.var_fonte,
+                            command=lambda: self.mapa.trocar_fonte(self.var_fonte.get())
+                            ).pack(side="right", padx=(8, 0))
+        centro = None if self.local["lat"] is None else (self.local["lat"], self.local["lon"])
+        self.mapa = mapa.MapaWidget(lado, t, largura=640, altura=470, centro=centro,
+                                    ao_marcar=self._marcado_no_mapa, baixador=self.baixador)
+        self.mapa.pack(fill="both", expand=True)
+        if centro:
+            self.mapa.marcar(*centro)
+        self._ler_coord()
+        return self.e_nome
+
+    # ---------------- coordenada ----------------
+    def _ponto(self):
+        return mapa.ler_coordenada(self.var_coord.get())
+
+    def _ler_coord(self, centralizar=False):
+        texto = self.var_coord.get().strip()
+        ponto = mapa.ler_coordenada(texto)
+        if ponto:
+            self.lbl_coord.configure(text=mapa.formatar_dms(*ponto))
+            if hasattr(self, "mapa"):
+                self.mapa.marcar(ponto[0], ponto[1], centralizar=centralizar
+                                 or self.mapa.marcador is None)
+        else:
+            self.lbl_coord.configure(text="Coordenada nao reconhecida." if texto else
+                                     "Sem coordenada: clique no mapa ou cole aqui.")
+        estado = "normal" if ponto else "disabled"
+        for botao in ("bt_maps", "bt_earth", "bt_endereco"):
+            if hasattr(self, botao):
+                getattr(self, botao).configure(state=estado)
+        return ponto
+
+    def _marcado_no_mapa(self, lat, lon):
+        self.var_coord.set(mapa.formatar_coordenada(lat, lon))
+
+    def _limpar(self):
+        self.var_coord.set("")
+        self.mapa.marcar(None, None)
+
+    # ---------------- google ----------------
+    def _abrir(self, gerar_link):
+        ponto = self._ponto()
+        if not ponto:
+            return
+        import webbrowser
+        webbrowser.open(gerar_link(*ponto))
+
+    # ---------------- busca de endereco ----------------
+    def _buscar(self):
+        texto = self.e_endereco.get().strip()
+        cidade = self.e_cidade.get().strip()
+        if not texto:
+            self.lbl_status.configure(text="Digite o endereco para procurar.")
+            return
+        consulta = texto if (not cidade or cidade.lower() in texto.lower()) \
+            else "%s, %s" % (texto, cidade)
+        self.lbl_status.configure(text="Procurando \"%s\"..." % consulta)
+        em_segundo_plano(self, lambda: mapa.buscar_endereco(consulta), self._busca_pronta)
+
+    def _busca_pronta(self, resultados, erro):
+        self.lista_busca.grid_forget()
+        if erro:
+            self.lbl_status.configure(text="Nao consegui procurar (sem internet?). "
+                                           "Cole a coordenada ou clique no mapa.")
+            return
+        self._resultados_busca = resultados or []
+        if not self._resultados_busca:
+            self.lbl_status.configure(text="Nenhum lugar encontrado com esse endereco.")
+            return
+        _, lat, lon = self._resultados_busca[0]
+        self.mapa.marcar(lat, lon, centralizar=True, avisar=True)
+        if len(self._resultados_busca) > 1:
+            self.lista_busca.delete(0, "end")
+            for descricao, _, _ in self._resultados_busca:
+                self.lista_busca.insert("end", descricao)
+            self.lista_busca.grid(row=self._linha_lista, column=0, sticky="we", pady=(4, 0))
+            self.lista_busca.selection_set(0)
+            self.lbl_status.configure(text="%d lugares encontrados - escolha na lista. "
+                                           "Confira o ponto no mapa." % len(self._resultados_busca))
+        else:
+            self.lbl_status.configure(text="Achei. Confira o ponto no mapa (clique pra ajustar).")
+
+    def _escolher_busca(self, _evento=None):
+        escolha = self.lista_busca.curselection()
+        if escolha and escolha[0] < len(self._resultados_busca):
+            _, lat, lon = self._resultados_busca[escolha[0]]
+            self.mapa.marcar(lat, lon, centralizar=True, avisar=True)
+
+    def _endereco_do_ponto(self):
+        ponto = self._ponto()
+        if not ponto:
+            return
+        self.lbl_status.configure(text="Buscando o endereco do ponto...")
+
+        def pronto(resultado, erro):
+            if erro or not resultado:
+                self.lbl_status.configure(text="Nao consegui achar o endereco (sem internet?).")
+                return
+            endereco, cidade = resultado
+            if endereco:
+                self.e_endereco.delete(0, "end")
+                self.e_endereco.insert(0, endereco)
+            if cidade:
+                self.e_cidade.delete(0, "end")
+                self.e_cidade.insert(0, cidade)
+            self.lbl_status.configure(text="Endereco preenchido. Confira o numero.")
+        em_segundo_plano(self, lambda: mapa.endereco_do_ponto(*ponto), pronto)
+
+    # ---------------- ok ----------------
+    def validate(self):
+        texto = self.var_coord.get().strip()
+        if texto and not self._ponto():
+            messagebox.showwarning("Coordenada", "Nao entendi a coordenada.\n\nExemplos que "
+                                   "funcionam:\n-23.550520, -46.633308\n"
+                                   "23°33'01.9\"S 46°38'00.0\"W\nou o link do Google Maps.",
+                                   parent=self)
+            return False
+        return True
+
+    def apply(self):
+        rotulo_para_tipo = {r: k for k, r in mapa.TIPOS_LOCAL}
+        ponto = self._ponto()
+        self.resultado = mapa.normalizar_local({
+            "tipo": rotulo_para_tipo.get(self.var_tipo.get(), ""),
+            "nome": self.e_nome.get(),
+            "endereco": self.e_endereco.get(),
+            "cidade": self.e_cidade.get(),
+            "lat": ponto[0] if ponto else None,
+            "lon": ponto[1] if ponto else None,
+            "obs": self.t_obs.get("1.0", "end"),
+        })
+
+
 class DialogFormato(DialogoBase):
     """Escolhe o formato antes de salvar."""
 
@@ -3484,7 +3905,9 @@ class DialogRastreio(DialogoBase):
                                                            sticky="w", pady=(0, 6))
         ttk.Label(master, text="Potencia de saida (dBm):").grid(row=1, column=0, sticky="w")
         self.e_potencia = ttk.Entry(master, width=8)
-        self.e_potencia.insert(0, "5.0")
+        # usa a potencia da propria porta da OLT, se tiver; senao 5 dBm
+        pot = self.rede.potencia_da_porta(*self.chave)
+        self.e_potencia.insert(0, "%.1f" % (pot if pot is not None else 5.0))
         self.e_potencia.grid(row=1, column=1, sticky="w")
         ttk.Button(master, text="Recalcular",
                    command=self._calcular).grid(row=1, column=2, sticky="w", padx=4)
@@ -3765,6 +4188,7 @@ class App(tk.Tk):
         self.escala = 1.0
         self.cena = None
         self._arraste_eq = None
+        self.mostrar_potencia = True   # camada de potencia (dBm) no diagrama
         self.selecao_lote = []         # portas marcadas com Shift+clique
         self._origem_arraste = None
         self._redesenho_pendente = False
@@ -3896,6 +4320,10 @@ class App(tk.Tk):
         self.bind_all("<Control-d>", lambda _: self.acao_duplicar_equipamento())
         self.bind_all("<F1>", lambda _: self.acao_ajuda())
         self.bind_all("<F5>", lambda _: self.acao_pendencias())
+        self.bind_all("<KeyPress-i>", self._tecla_atalho(self.acao_inverter_lado))
+        self.bind_all("<KeyPress-I>", self._tecla_atalho(self.acao_inverter_lado))
+        self.bind_all("<KeyPress-p>", self._tecla_atalho(self.acao_alternar_potencia))
+        self.bind_all("<KeyPress-P>", self._tecla_atalho(self.acao_alternar_potencia))
         self.bind_all("<Escape>", self._tecla_esc)
 
     # ---------------- janela ----------------
@@ -3937,10 +4365,20 @@ class App(tk.Tk):
              "placa gpon controle grupamento sfp qsfp splitter"),
             ("arrow-left-right", "Inverter lado das portas", "", self.acao_inverter_lado,
              "espelhar lado"),
+            ("activity", "Mostrar / ocultar potencia (dBm)", "P", self.acao_alternar_potencia,
+             "sinal dbm nivel atenuacao camada"),
+            ("activity", "Potencia de saida da porta da OLT", "", self.acao_potencia_porta,
+             "dbm sinal transmissao tx laser"),
             ("rotate-cw", "Girar (vertical / horizontal)", "", self.acao_girar_dio,
              "virar deitar em pe orientacao"),
             ("trash-2", "Excluir equipamento", "", self.acao_remover_equipamento,
              "remover apagar deletar"),
+            ("map-pin", "Localizacao do diagrama (mapa)", "", self.acao_local,
+             "mapa local gps coordenada endereco pop cto ceo caixa emenda onde fica"),
+            ("map", "Abrir no Google Maps", "", self.acao_google_maps,
+             "mapa google maps navegador rota como chegar"),
+            ("globe", "Abrir no Google Earth", "", self.acao_google_earth,
+             "google earth satelite 3d navegador"),
             ("route", "Rastrear caminho da fibra", "Ctrl+F", self.acao_rastrear,
              "perda potencia db sinal caminho"),
             ("x", "Limpar destaque do rastreio", "", self.acao_limpar_destaque, "tirar"),
@@ -3983,6 +4421,8 @@ class App(tk.Tk):
         return (grupo("Nova rede", "Abrir rede", "Salvar", "Salvar como") + [None]
                 + grupo("Exportar diagrama", "Relatorio PDF completo",
                         "Planilha para o Excel (CSV)") + [None]
+                + grupo("Localizacao do diagrama (mapa)", "Abrir no Google Maps",
+                        "Abrir no Google Earth") + [None]
                 + grupo("Criar varios equipamentos", "Pendencias e capacidade",
                         "Carregar rede de exemplo") + [None]
                 + grupo("Como usar", "Autoteste", "Sair do WaspFiber"))
@@ -4184,6 +4624,11 @@ class App(tk.Tk):
                                      font=(self.fonte_ui, 10))
         self.lbl_alterado.pack(side="left", padx=(4, 0))
         nix_ui.Tooltip(self.lbl_alterado, "Alteracoes nao salvas (Ctrl+S)", t)
+        # B0.34: onde fica este diagrama (POP / caixa de emenda / CTO)
+        self.botao_local = BotaoIcone(barra, t, "map-pin", texto="Definir localizacao",
+                                      comando=self.acao_local)
+        self.botao_local.pack(side="left", padx=(14, 0))
+        self.dica_local = nix_ui.Tooltip(self.botao_local, "Localizacao do diagrama no mapa", t)
 
         self.botao_menu = BotaoIcone(barra, t, "ellipsis", dica="Menu")
         self.botao_menu.pack(side="right")
@@ -4292,9 +4737,14 @@ class App(tk.Tk):
         tk.Frame(flutuante, bg=t["ui_borda"], width=1, height=18).pack(side="left", padx=4)
         BotaoIcone(flutuante, t, "maximize-2", dica="Centralizar", variante="normal",
                    comando=lambda: self.atualizar_tudo(centralizar=True)).pack(side="left")
+        self.botao_potencia = BotaoIcone(flutuante, t, "activity", variante="acento",
+                                         dica="Mostrar / ocultar a potencia (dBm)  (P)",
+                                         comando=self.acao_alternar_potencia)
+        self.botao_potencia.pack(side="left")
         BotaoIcone(flutuante, t, "layout-grid", dica="Organizar layout", variante="normal",
                    comando=self.acao_organizar).pack(side="left")
 
+        self.menu_contexto = nix_ui.MenuSuspenso(self.canvas, t, [])
         # Esc fecha o que estiver aberto; clique fora fecha a paleta
         self.bind_all("<ButtonPress-1>", self._clique_fora_da_paleta, add="+")
 
@@ -4376,6 +4826,8 @@ class App(tk.Tk):
             self.fechar_paleta()
         elif self.menu_principal.aberto():
             self.menu_principal.fechar()
+        elif self.menu_contexto.aberto():
+            self.menu_contexto.fechar()
         elif self.porta_selecionada is not None:
             self._limpar_selecao()
         elif self.destaque:
@@ -4553,9 +5005,18 @@ class App(tk.Tk):
         return "break"
 
     # ---------------- desenho ----------------
+    def _potencias(self):
+        """Potencia calculada pra camada do diagrama (None se desligada ou
+        se nenhuma porta de OLT tem potencia informada)."""
+        if not self.mostrar_potencia:
+            return None
+        calc = calcular_potencias(self.rede)
+        return calc if calc["fontes"] else None
+
     def atualizar_tudo(self, centralizar=False):
         self.cena = montar_cena(self.rede, self.porta_selecionada,
-                                destaque=self.destaque, selecao_lote=self.selecao_lote)
+                                destaque=self.destaque, selecao_lote=self.selecao_lote,
+                                potencias=self._potencias())
         self._desenhar_canvas()
         if centralizar:
             self._ajustar_zoom_para_caber()
@@ -4637,6 +5098,12 @@ class App(tk.Tk):
             c.tag_bind(tag, "<Leave>", lambda ev: self._apagar_fusoes())
         # arrastar: pega o equipamento por qualquer parte (menos pelas portas,
         # que continuam sendo clique pra fundir)
+        for chave in self.cena.portas:
+            tag = "porta:%s|%s|%d" % (chave[0], chave[1] or "", chave[2])
+            c.tag_bind(tag, "<Button-3>", lambda ev, k=chave: self._menu_porta(ev, k))
+        for eq_id in self.cena.titulos:
+            c.tag_bind("eq:%s" % eq_id, "<Button-3>",
+                       lambda ev, i=eq_id: self._menu_equipamento(ev, i))
         for eq_id in self.cena.titulos:
             tag = "eq:%s" % eq_id
             # so o "pegar" fica no item; mover e soltar ficam no canvas (o
@@ -4689,8 +5156,12 @@ class App(tk.Tk):
                     c.create_oval(x - r * e, y - r * e, x + r * e, y + r * e, state="disabled",
                                   outline=t["destaque"], width=2, tags=("acesa",))
             a, b = f.pontas()
-            textos.append("%s  \u2194  %s%s" % (self.rede.nome_porta(*a), self.rede.nome_porta(*b),
-                                              ("   [%s]" % f.rotulo) if f.rotulo else ""))
+            pot = (self.cena.potencias or {}).get("fusoes", {}).get(fid) \
+                if self.cena.potencias else None
+            textos.append("%s  \u2194  %s%s%s" % (self.rede.nome_porta(*a), self.rede.nome_porta(*b),
+                                                ("   [%s]" % f.rotulo) if f.rotulo else "",
+                                                ("   \u00b7   %s" % formatar_dbm(pot))
+                                                if pot is not None else ""))
         if textos:
             self.status.config(text="   |   ".join(textos))
 
@@ -4792,6 +5263,17 @@ class App(tk.Tk):
                 break
         self.lbl_arquivo.configure(text=arquivo)
         self.lbl_alterado.configure(text="•" if self.alteracoes_pendentes else "")
+        if hasattr(self, "botao_local"):
+            local = self.rede.local
+            if mapa.local_preenchido(local):
+                texto = mapa.resumo_local(local, com_coordenada=False) or "Local sem nome"
+                dica = mapa.resumo_local(local) + (
+                    "\nClique para ver no mapa" if local["lat"] is not None
+                    else "\nSem coordenada - clique para marcar no mapa")
+            else:
+                texto, dica = "Definir localizacao", "Localizacao do diagrama no mapa"
+            self.botao_local.configure(text=texto)
+            self.dica_local.texto = dica
         self.lbl_zoom.configure(text="%d%%" % round(self.escala * 100))
 
     def _clicar_cartao(self, eq_id):
@@ -4960,7 +5442,8 @@ class App(tk.Tk):
         if not caminho.lower().endswith("." + fmt):
             caminho += "." + fmt
         try:
-            cena = montar_cena(self.rede, destaque=self.destaque, tema=tema_saida)
+            cena = montar_cena(self.rede, destaque=self.destaque, tema=tema_saida,
+                               potencias=self._potencias())
             if fmt == "pdf":
                 escrever_pdf([pagina_do_diagrama(cena)], caminho)
             elif fmt == "svg":
@@ -4995,7 +5478,8 @@ class App(tk.Tk):
         if not caminho.lower().endswith(".pdf"):
             caminho += ".pdf"
         try:
-            exportar_relatorio_pdf(self.rede, montar_cena(self.rede, tema=tema_saida),
+            exportar_relatorio_pdf(self.rede, montar_cena(self.rede, tema=tema_saida,
+                                                          potencias=self._potencias()),
                                    caminho, tema=tema_saida)
         except Exception as erro:
             messagebox.showerror("Erro ao gerar o relatorio", str(erro))
@@ -5054,16 +5538,55 @@ class App(tk.Tk):
             "O DIO tem traseira (fusao da fibra do cabo) e frente (cordao). "
             "Pra fundir varias de uma vez: clique na primeira, Shift+clique na ultima "
             "e depois clique na primeira porta de destino.\n\n"
+            "Botao direito no equipamento: inverter lado (tecla I), girar, editar, "
+            "duplicar, excluir. Botao direito numa porta da OLT: potencia de saida - o "
+            "caminho do sinal aparece marcado em dBm (tecla P liga/desliga).\n\n"
             "Duplo clique numa porta da lista lateral troca o conector (SC/LC), o "
             "polimento (APC verde / UPC azul) e simplex/duplex (duplex e sempre LC).\n\n"
             "5. RASTREAR (Ctrl+F): por onde o sinal passa, perda em dB e potencia "
             "em cada ponta. Esc tira o destaque.\n\n"
             "6. PENDENCIAS (F5): splitter sem entrada, duplex pela metade, nomes "
             "repetidos - e quantas portas ainda estao livres.\n\n"
+            "7. LOCALIZACAO: o botao com o pino, no topo, diz de qual local e o "
+            "diagrama (POP, caixa de emenda ou CTO). Clique no mapa pra marcar, ou "
+            "cole a coordenada / o link do Google Maps. Dali abre no Google Maps "
+            "e no Google Earth.\n\n"
             "Arraste o equipamento por qualquer parte pra move-lo; o botao de girar "
             "deita/levanta o DIO. Roda do mouse = zoom; arrastar no vazio = mover a vista. "
             "Ctrl+Z desfaz, Ctrl+S salva. Se fechar no meio do trabalho, o programa "
             "oferece recuperar na proxima abertura."))
+
+    # ---------------- localizacao (B0.34) ----------------
+    def acao_local(self):
+        dialogo = DialogLocal(self, self.rede.local)
+        if dialogo.resultado is None or dialogo.resultado == self.rede.local:
+            return
+        self._snapshot()
+        self.rede.definir_local(dialogo.resultado)
+        self._marcar_alterado()
+        self.atualizar_tudo()
+        self.status.config(text="Localizacao do diagrama: %s"
+                           % (mapa.resumo_local(self.rede.local) or "removida"))
+
+    def _abrir_no_google(self, gerar_link, nome):
+        local = self.rede.local
+        if local.get("lat") is None:
+            if messagebox.askyesno(nome, "Este diagrama ainda nao tem coordenada.\n\n"
+                                         "Marcar o local no mapa agora?"):
+                self.acao_local()
+            if self.rede.local.get("lat") is None:
+                return
+            local = self.rede.local
+        import webbrowser
+        webbrowser.open(gerar_link(local["lat"], local["lon"]))
+        self.status.config(text="Abrindo no %s: %s" % (
+            nome, mapa.formatar_coordenada(local["lat"], local["lon"])))
+
+    def acao_google_maps(self):
+        self._abrir_no_google(mapa.link_google_maps, "Google Maps")
+
+    def acao_google_earth(self):
+        self._abrir_no_google(mapa.link_google_earth, "Google Earth")
 
     def acao_autoteste(self):
         caminho = os.path.join(pasta_do_programa(), "autoteste.txt")
@@ -5203,6 +5726,55 @@ class App(tk.Tk):
             self._marcar_alterado()
             self.atualizar_tudo()
 
+    def acao_alternar_potencia(self):
+        self.mostrar_potencia = not self.mostrar_potencia
+        self.botao_potencia.variante = "acento" if self.mostrar_potencia else "normal"
+        self.botao_potencia._sair()
+        self.atualizar_tudo()
+        if self.mostrar_potencia and not calcular_potencias(self.rede)["fontes"]:
+            self.status.config(text="Nenhuma porta de OLT tem potencia: clique com o botao "
+                                    "direito numa porta da OLT > Potencia de saida.")
+        else:
+            self.status.config(text="Potencia no diagrama: %s."
+                               % ("ligada" if self.mostrar_potencia else "desligada"))
+
+    def acao_potencia_porta(self, chave=None):
+        """Pergunta a potencia de saida (dBm) de uma porta de OLT/ativo."""
+        chave = chave or self._porta_para_rastrear()
+        if chave is None or self.rede.equipamentos[chave[0]].tipo not in TIPOS_ATIVOS:
+            messagebox.showinfo("Potencia", "Escolha uma porta de OLT (clique na porta ou "
+                                            "use o botao direito em cima dela).")
+            return
+        atual = self.rede.potencia_da_porta(*chave)
+        texto = perguntar_texto(
+            "Potencia de saida",
+            "%s\n\nPotencia de saida em dBm (ex.: 3, 5, 7 ou -1,5).\n"
+            "Deixe vazio pra tirar." % self.rede.nome_porta(*chave),
+            parent=self, initialvalue="" if atual is None else ("%g" % atual).replace(".", ","))
+        if texto is None:
+            return
+        texto = texto.strip().replace(",", ".").replace("+", "").replace("dBm", "").strip()
+        try:
+            valor = float(texto) if texto else None
+        except ValueError:
+            messagebox.showerror("Potencia invalida", "Digite so o numero em dBm, ex.: 5 ou -1,5.")
+            return
+        self._snapshot()
+        try:
+            self.rede.definir_potencia(*chave, valor)
+        except ValueError as erro:
+            self._historico.pop()
+            messagebox.showerror("Potencia invalida", str(erro))
+            return
+        self._limpar_selecao()
+        self._marcar_alterado()
+        if valor is not None and not self.mostrar_potencia:
+            self.acao_alternar_potencia()
+        self.atualizar_tudo()
+        self.status.config(text="%s: %s" % (self.rede.nome_porta(*chave),
+                                            formatar_dbm(valor) if valor is not None
+                                            else "sem potencia"))
+
     def acao_girar_dio(self):
         eq = self._eq_selecionado()
         if eq is None or not (eq.is_dio() or eq.tipo in TIPOS_ATIVOS):
@@ -5306,6 +5878,11 @@ class App(tk.Tk):
             self.acao_editar_modulo()
             return
         _, eq_id, mod_id, num = item
+        self.abrir_porta((eq_id, mod_id, num))
+
+    def abrir_porta(self, chave):
+        """Dialogo da porta: conector, simplex/duplex, potencia e fusoes."""
+        eq_id, mod_id, num = chave
         self._snapshot()
         antes = json.dumps(self.rede.to_dict())
         DialogPorta(self, self.rede, eq_id, mod_id, num, lambda: None,
@@ -5315,6 +5892,108 @@ class App(tk.Tk):
         elif self._historico:
             self._historico.pop()          # nada mudou: nao suja o historico
         self.atualizar_tudo()
+
+    # ---------------- menu do botao direito ----------------
+    def _no_equipamento(self, eq_id, funcao):
+        """Seleciona o equipamento e roda a acao (as acoes usam a selecao)."""
+        def rodar():
+            if self._selecionar_equipamento(eq_id):
+                funcao()
+        return rodar
+
+    def _itens_menu_equipamento(self, eq_id):
+        eq = self.rede.equipamentos[eq_id]
+        em = lambda f: self._no_equipamento(eq_id, f)
+        itens = [("arrow-left-right", "Inverter lado", "I", em(self.acao_inverter_lado))]
+        if eq.is_dio() or eq.tipo in TIPOS_ATIVOS:
+            itens.append(("rotate-cw", "Girar (vertical / horizontal)", "",
+                          em(self.acao_girar_dio)))
+        itens.append(("pencil", "Editar", "", em(self.acao_editar_equipamento)))
+        if not eq.tem_lados():
+            itens.append(("box", "Novo modulo", "", em(self.acao_novo_modulo)))
+        itens.append(("copy", "Duplicar", "Ctrl+D", em(self.acao_duplicar_equipamento)))
+        if eq.tipo == "OLT":
+            itens.append(("activity", "Potencia em todas as portas PON...", "",
+                          lambda: self.acao_potencia_olt(eq_id)))
+        itens += [None, ("trash-2", "Excluir", "", em(self.acao_remover_equipamento))]
+        return itens
+
+    def _menu_equipamento(self, evento, eq_id):
+        if self._sobre_porta():
+            return                       # o menu da porta cuida
+        self._selecionar_equipamento(eq_id)
+        self.menu_contexto.abrir_em(evento.x_root, evento.y_root,
+                                    self._itens_menu_equipamento(eq_id))
+        return "break"
+
+    def _menu_porta(self, evento, chave):
+        eq = self.rede.equipamentos[chave[0]]
+        itens = [("pencil", "Editar porta (conector, duplex, fusoes)", "",
+                  lambda: self.abrir_porta(chave))]
+        if eq.tipo in TIPOS_ATIVOS:
+            atual = self.rede.potencia_da_porta(*chave)
+            itens.append(("activity", "Potencia de saida%s..." % (
+                "  (%s)" % formatar_dbm(atual) if atual is not None else ""), "",
+                lambda: self.acao_potencia_porta(chave)))
+        itens.append(("route", "Rastrear a partir daqui", "", lambda: self._rastrear_chave(chave)))
+        if self.rede.fusoes_na_porta(*chave):
+            itens.append(("x", "Remover a(s) fusao(oes) desta porta", "",
+                          lambda: self._remover_fusoes_da_porta(chave)))
+        itens += [None] + self._itens_menu_equipamento(chave[0])
+        self._selecionar_equipamento(chave[0])
+        self.menu_contexto.abrir_em(evento.x_root, evento.y_root, itens)
+        return "break"
+
+    def _remover_fusoes_da_porta(self, chave):
+        fusoes = self.rede.fusoes_na_porta(*chave)
+        if not fusoes:
+            return
+        self._snapshot()
+        for f in fusoes:
+            self.rede.remover_fusao(f.id)
+        self.destaque = set()
+        self._marcar_alterado()
+        self.atualizar_tudo()
+        self.status.config(text="%d fusao(oes) removida(s) de %s. Ctrl+Z desfaz."
+                           % (len(fusoes), self.rede.nome_porta(*chave)))
+
+    def acao_potencia_olt(self, eq_id):
+        """Mesma potencia em todas as portas das placas GPON da OLT."""
+        eq = self.rede.equipamentos[eq_id]
+        placas = [m for m in eq.modulos.values() if m.tipo.startswith("GPON")]
+        if not placas:
+            messagebox.showinfo("Potencia", "Esta OLT nao tem placa GPON.")
+            return
+        texto = perguntar_texto(
+            "Potencia nas portas PON",
+            "%s - %d placa(s) GPON.\n\nPotencia de saida em dBm pra TODAS as portas PON "
+            "(ex.: 3, 5, 7).\nDeixe vazio pra tirar." % (eq.nome, len(placas)), parent=self)
+        if texto is None:
+            return
+        texto = texto.strip().replace(",", ".").replace("+", "").replace("dBm", "").strip()
+        try:
+            valor = float(texto) if texto else None
+            if valor is not None and not -40.0 <= valor <= 30.0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Potencia invalida", "Digite so o numero em dBm (-40 a +30).")
+            return
+        self._snapshot()
+        for placa in placas:
+            self.rede.definir_potencia_em_lote(eq_id, placa.id, valor)
+        self._marcar_alterado()
+        if valor is not None and not self.mostrar_potencia:
+            self.acao_alternar_potencia()
+        self.atualizar_tudo()
+
+    def _tecla_atalho(self, funcao):
+        """Atalho de uma letra so: nao dispara enquanto se digita num campo."""
+        def tratar(evento):
+            classe = evento.widget.winfo_class() if hasattr(evento.widget, "winfo_class") else ""
+            if classe in ("Entry", "TEntry", "Text", "TCombobox", "Spinbox", "TSpinbox"):
+                return
+            funcao()
+        return tratar
 
     # ---------------- busca, rastreio e pendencias ----------------
     def acao_buscar(self):
@@ -5592,7 +6271,7 @@ class App(tk.Tk):
         if self._origem_arraste is None:
             return
         self.cena = montar_cena(self.rede, self.porta_selecionada, destaque=self.destaque,
-                                selecao_lote=self.selecao_lote)
+                                selecao_lote=self.selecao_lote, potencias=self._potencias())
         # durante o arraste a origem fica parada: senao a vista pularia
         # quando o equipamento passasse da borda do diagrama
         self.cena.minx, self.cena.miny = self._origem_arraste

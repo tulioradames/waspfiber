@@ -1,4 +1,4 @@
-WASPFIBER - diagramas de fusao e fibra optica (FTTX)         versao B0.32
+WASPFIBER - diagramas de fusao e fibra optica (FTTX)         versao B0.34
 =========================================================================
 
 COMO ABRIR
@@ -6,6 +6,65 @@ COMO ABRIR
 Clique duas vezes em WaspFiber.exe. E isso - nao precisa instalar nada.
 Na primeira vez o Windows pode avisar "O Windows protegeu o computador":
 clique em "Mais informacoes" > "Executar assim mesmo".
+
+
+O QUE MUDOU NA B0.34 (localizacao no mapa)
+------------------------------------------
+- CADA DIAGRAMA TEM O SEU LOCAL: POP, caixa de emenda (CEO) ou CTO, com
+  nome, endereco, cidade, coordenada e observacao. Fica salvo dentro do
+  proprio .wasp.json.
+- No topo, ao lado do nome do arquivo, o botao com o PINO mostra de qual
+  local e o diagrama ("CTO  ·  CTO-Bairro-01  ·  Santos - SP"). Rede sem
+  local mostra "Definir localizacao".
+- A janela de localizacao tem um MAPA DE VERDADE dentro do programa:
+  ruas (OpenStreetMap) ou satelite (Esri). Arraste pra mover, roda do
+  mouse pra zoom e um clique marca o ponto. O mapa abre onde voce parou
+  da ultima vez e guarda o que ja baixou (abre mais rapido depois).
+- COLAR COORDENADA: aceita o que vier do Google -
+    -23.550520, -46.633308         (Google Maps, botao direito no ponto)
+    -23,550520 -46,633308          (virgula decimal)
+    23°33'01.9"S 46°38'00.0"W      (Google Earth)
+    o link inteiro do Google Maps  (https://www.google.com/maps/...)
+- PROCURAR ENDERECO: digite a rua e aperte Enter - o mapa vai ate la.
+  Ao contrario, "Preencher endereco pelo ponto" escreve a rua e a cidade
+  do ponto marcado.
+- ABRIR NO GOOGLE MAPS / GOOGLE EARTH: botoes na janela de localizacao,
+  e tambem no menu "..." e na paleta (Ctrl+K > "google"). Abre no
+  navegador, sem chave de API.
+- O cabecalho do diagrama (tela, PDF e SVG) mostra o local e a coordenada.
+- Sem internet: o mapa avisa, mas a coordenada continua podendo ser
+  colada ou digitada.
+- Ctrl+Z desfaz a mudanca de localizacao. Redes antigas abrem sem local.
+- Por que o mapa de dentro nao e o do Google: o Google nao permite usar
+  as imagens dele fora do site/API paga. Por isso o mapa interno e o
+  OpenStreetMap/Esri e o Google abre no navegador.
+
+
+O QUE MUDOU NA B0.33 (botao direito e potencia no caminho)
+---------------------------------------------------------
+- BOTAO DIREITO no equipamento (no diagrama) abre um menu: Inverter
+  lado, Girar (vertical/horizontal), Editar, Novo modulo, Duplicar,
+  Excluir - e, na OLT, "Potencia em todas as portas PON".
+  Botao direito numa PORTA: Editar porta, Potencia de saida (na OLT),
+  Rastrear a partir daqui e Remover as fusoes dela.
+- Tecla I inverte o lado do equipamento escolhido (nao dispara enquanto
+  voce digita num campo).
+- POTENCIA NA PORTA DA OLT: informe os dBm de saida (botao direito na
+  porta > Potencia de saida, ou no dialogo da porta). O programa segue o
+  caminho - cordao, DIO, cabo, splitter - e marca no diagrama:
+  - o valor que chega em cada porta (ex.: -6,4 dBm), do lado de fora;
+  - a fibra com sinal ganha um contorno verde (ok), laranja (alerta,
+    abaixo de -25 dBm) ou vermelho (critico, abaixo de -28 dBm);
+  - na porta da OLT aparece "TX +5,0 dBm".
+  Saida de splitter ainda sem cliente tambem mostra o sinal disponivel.
+  Se dois caminhos chegam no mesmo ponto, vale o mais forte.
+- O botao com o grafico (canto do diagrama) ou a tecla P ligam e
+  desligam a camada de potencia. Passar o mouse numa fibra mostra o dBm
+  dela no rodape. O PDF/SVG exportado sai com a potencia se ela estiver
+  ligada.
+- O rastreio (Ctrl+F) ja comeca com a potencia da propria porta.
+- A rede de exemplo vem com +5 dBm nas PONs 2 e 4.
+- A conta ainda nao inclui o comprimento do cabo (0,35 dB/km).
 
 
 O QUE MUDOU NA B0.32 (dialogos no tema)
@@ -343,8 +402,9 @@ PERDA_FUSAO_DB, PERDA_CONECTOR_DB e PERDA_SPLITTER_DB no waspfiber.py e gere o .
 QUEM QUISER MEXER NO CODIGO
 ---------------------------
 O programa e o waspfiber.py (modelo, desenho, exportacoes e janela), mais
-o waspfiber_ui.py (botoes, menus, cartoes) e o waspfiber_icones.py (icones Lucide,
-licenca ISC, ja embutidos). Nenhuma dependencia externa: so precisa do
+o waspfiber_ui.py (botoes, menus, cartoes), o waspfiber_mapa.py (localizacao,
+mapa e links do Google) e o waspfiber_icones.py (icones Lucide, licenca ISC,
+ja embutidos). Nenhuma dependencia externa: so precisa do
 Python 3.8+ com tkinter, que ja vem junto no Windows.
 Pra rodar direto: python waspfiber.py
 Os testes (teste_core.py e teste_gui.py) verificam modelo, busca,

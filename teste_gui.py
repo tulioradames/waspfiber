@@ -6,10 +6,13 @@ import types
 import tkinter.messagebox as mb
 import tkinter.simpledialog as sd
 
+import tempfile
+import webbrowser
+
 import waspfiber as fttx
 from waspfiber import App
 
-PASTA = __import__("tempfile").gettempdir()
+PASTA = tempfile.mkdtemp(prefix="waspfiber_teste_").replace("\\", "/")
 FALHAS = []
 
 
@@ -423,6 +426,130 @@ checar(app.selecao_lote == [] and app.porta_selecionada["eq_id"] == "CABO-02",
 app._limpar_selecao()
 mb.showerror = lambda *a, **k: None
 fttx.perguntar_texto = lambda *a, **k: "TESTE"
+
+print("== botao direito, inverter e potencia (B0.33) ==")
+import types as _t2
+app.acao_exemplo()
+app.update()
+ev3 = _t2.SimpleNamespace(x_root=300, y_root=300)
+app._menu_equipamento(ev3, "DIO-01")
+app.update()
+nomes = [i[1] for i in app.menu_contexto.itens if i]
+checar(app.menu_contexto.aberto() and "Inverter lado" in nomes and "Girar (vertical / horizontal)" in nomes,
+       "botao direito no equipamento abre o menu", nomes[:4])
+lado_antes = app.rede.equipamentos["DIO-01"].lado_efetivo()
+[i for i in app.menu_contexto.itens if i and i[1] == "Inverter lado"][0][3]()
+app.update()
+checar(app.rede.equipamentos["DIO-01"].lado_efetivo() != lado_antes, "Inverter lado pelo menu")
+app.menu_contexto.fechar()
+app._tecla_atalho(app.acao_inverter_lado)(_t2.SimpleNamespace(widget=app.canvas))
+checar(app.rede.equipamentos["DIO-01"].lado_efetivo() == lado_antes, "tecla I inverte de novo")
+app._menu_porta(ev3, ("OLT-01", "OLT-01-PLACA-01", 1))
+nomes = [i[1] for i in app.menu_contexto.itens if i]
+checar(any(n.startswith("Potencia de saida") for n in nomes), "botao direito na porta da OLT oferece potencia")
+app.menu_contexto.fechar()
+fttx.perguntar_texto = lambda *a, **k: "+3,5"
+app.acao_potencia_porta(("OLT-01", "OLT-01-PLACA-01", 1))
+app.update()
+checar(app.rede.potencia_da_porta("OLT-01", "OLT-01-PLACA-01", 1) == 3.5, "define a potencia digitando +3,5")
+fttx.perguntar_texto = lambda *a, **k: "TESTE"
+checar(app.cena.potencias and app.cena.potencias["fontes"], "diagrama recalcula a potencia")
+app.acao_alternar_potencia()
+checar(app.cena.potencias is None, "botao P desliga a camada de potencia")
+app.acao_alternar_potencia()
+checar(app.cena.potencias is not None, "e liga de novo")
+app.acao_desfazer()
+app.update()
+checar(app.rede.potencia_da_porta("OLT-01", "OLT-01-PLACA-01", 1) is None, "Ctrl+Z desfaz a potencia")
+
+print("== localizacao no mapa (B0.34) ==")
+# mapa sem internet nos testes: todo tile vira um quadrado PNG gerado aqui
+_png = fttx.tk.PhotoImage(master=app, width=256, height=256)
+_png.put("#3a6b4a", to=(0, 0, 256, 256))
+_bytes_png = _png.data(format="png")
+_bytes_png = _bytes_png if isinstance(_bytes_png, bytes) else __import__("base64").b64decode(_bytes_png)
+tiles_pedidos = []
+fttx.mapa.baixar_tile = lambda f, z, x, y, pasta=None: (tiles_pedidos.append((f, z, x, y)), _bytes_png)[1]
+fttx.mapa.gravar_ultima_vista = lambda *a, **k: None
+abertos = []
+webbrowser.open = lambda url, *a, **k: abertos.append(url)
+checar("POP Centro" in app.botao_local.cget("text"), "topo mostra o local da rede de exemplo",
+       app.botao_local.cget("text"))
+_body = fttx.DialogLocal.body
+dialogos = []
+fttx.DialogLocal.body = lambda self, master: (dialogos.append(self), _body(self, master))[1]
+resultado = {}
+
+
+def mexer_no_dialogo():
+    d = dialogos[-1]
+    for _ in range(40):          # deixa as threads entregarem os tiles
+        d.update()
+        __import__("time").sleep(0.02)
+    resultado["tiles"] = len(d.mapa._imagens)
+    resultado["pino_inicial"] = d.mapa.marcador
+    d.var_coord.set("https://www.google.com/maps/place/x/@-22.9,-43.2,17z/data=!3d-22.9068!4d-43.1729")
+    d.update()
+    resultado["pino_link"] = d.mapa.marcador
+    resultado["dms"] = d.lbl_coord.cget("text")
+    d.var_coord.set("isso nao e coordenada")
+    d.update()
+    resultado["botao_desligado"] = str(d.bt_maps.cget("state"))
+    ev = __import__("types").SimpleNamespace(x=320, y=235, delta=0)
+    d.mapa._press(ev)
+    d.mapa._release(ev)
+    d.update()
+    resultado["coord_clique"] = d.var_coord.get()
+    resultado["ponto_clique"] = d.mapa.marcador
+    zoom = d.mapa.zoom
+    d.mapa._roda(__import__("types").SimpleNamespace(x=100, y=100, delta=120))
+    resultado["zoom"] = (zoom, d.mapa.zoom)
+    d.var_fonte.set("satelite")
+    d.mapa.trocar_fonte("satelite")
+    d.update()
+    d.bt_maps.invoke()
+    d.var_tipo.set("CTO")
+    d.e_nome.delete(0, "end")
+    d.e_nome.insert(0, "CTO-Bairro-01")
+    d.ok()
+
+
+app.after(50, mexer_no_dialogo)
+app.acao_local()
+app.update()
+checar(resultado.get("tiles", 0) > 0, "mapa desenha os tiles", resultado.get("tiles"))
+checar(resultado.get("pino_inicial") == (-23.55052, -46.633308), "mapa abre no local salvo")
+checar(resultado.get("pino_link") == (-22.9068, -43.1729), "colar link do Google Maps move o pino")
+checar("S" in resultado.get("dms", "") and "W" in resultado.get("dms", ""), "mostra em graus/min/seg",
+       resultado.get("dms"))
+checar(resultado.get("botao_desligado") == "disabled", "coordenada invalida desliga o Google Maps")
+checar(resultado.get("coord_clique") and fttx.mapa.ler_coordenada(resultado["coord_clique"])
+       == resultado.get("ponto_clique"), "clique no mapa marca o ponto", resultado.get("coord_clique"))
+checar(resultado.get("zoom", (0, 0))[1] == resultado.get("zoom", (0, 0))[0] + 1, "roda do mouse da zoom")
+checar(any(t[0] == "satelite" for t in tiles_pedidos), "troca pra satelite pede tiles de satelite")
+checar(abertos and "google.com/maps" in abertos[-1], "botao abre o Google Maps no navegador")
+checar(app.rede.local["tipo"] == "CTO" and app.rede.local["nome"] == "CTO-Bairro-01"
+       and app.rede.local["lat"] == resultado.get("ponto_clique", (None,))[0],
+       "OK grava o local na rede", app.rede.local)
+checar("CTO" in app.botao_local.cget("text") and app.alteracoes_pendentes,
+       "topo atualiza e marca alteracao", app.botao_local.cget("text"))
+app.acao_google_earth()
+checar(abertos[-1].startswith("https://earth.google.com/web/@"), "abre no Google Earth", abertos[-1])
+app.acao_desfazer()
+app.update()
+checar(app.rede.local["tipo"] == "POP", "Ctrl+Z desfaz a localizacao")
+nomes = [r[1] for r in app.resultados_paleta("google")]
+checar("Abrir no Google Maps" in nomes and "Abrir no Google Earth" in nomes, "paleta acha 'google'", nomes)
+checar(any("Localizacao" in r[1] for r in app.resultados_paleta("cto")), "paleta acha o local por 'cto'")
+app.rede = fttx.Rede()
+app.atualizar_tudo()
+abertos.clear()
+fttx.mb_askyesno_original = mb.askyesno
+mb.askyesno = lambda *a, **k: False
+app.acao_google_maps()
+mb.askyesno = lambda *a, **k: True
+checar(not abertos, "sem coordenada nao abre o navegador")
+checar(app.botao_local.cget("text") == "Definir localizacao", "rede nova pede pra definir o local")
 
 print("== rede vazia ==")
 app.rede = fttx.Rede()
