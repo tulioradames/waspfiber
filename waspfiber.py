@@ -31,7 +31,7 @@ import waspfiber_mapa as mapa   # localizacao do diagrama (B0.34)
 import waspfiber_cidades as cidades   # cidades (pastas) e diagramas (B0.36)
 
 APP_NOME = "WaspFiber"
-VERSAO = "B0.36"
+VERSAO = "B0.37"
 EXTENSAO = ".wasp.json"
 EXTENSAO_NIX = ".nix.json"      # redes salvas quando o programa se chamava Nix
 
@@ -1419,28 +1419,29 @@ def rastreio_em_texto(no, nivel=0, linhas=None, mostrar_potencia=True):
 TEMA_GRAFITE = {
     "nome": "Grafite",
     "escuro": True,
-    "fundo": "#15181b",
-    "caixa_fundo": "#1d2126", "caixa_borda": "#2c333a", "caixa_lw": 1.0,
-    "titulo_cor": "#e9ecee", "titulo_tam": 10.5, "titulo_regua": "#2c333a",
-    "tipo_cor": "#6f7b84", "tipo_tam": 6.8,
-    "modulo_fundo": "#20262c", "modulo_cor": "#8b98a2", "modulo_regua": "#2c333a",
-    "porta_cor": "#aab4bb", "porta_tam": 7.8, "zebra": "#1a1e23",
+    "fundo": "#0e1115",
+    "caixa_fundo": "#191e24", "caixa_borda": "#2b333c", "caixa_lw": 1.0,
+    "titulo_cor": "#eef1f4", "titulo_tam": 10.5, "titulo_regua": "#2b333c",
+    "tipo_cor": "#76838f", "tipo_tam": 6.8,
+    "modulo_fundo": "#1e242b", "modulo_cor": "#8b98a4", "modulo_regua": "#2b333c",
+    "porta_cor": "#b0bac2", "porta_tam": 7.8, "zebra": "#161a20",
     "livre": "#39424a", "uso": "#53c08d", "parcial": "#d9a441",
     "fibra": "#64727c", "duplex1": "#e08a4c", "duplex2": "#6aa9e0",
     "rotulo_cor": "#8b98a2",
     "destaque": "#4dd0e1", "halo": "#1f3b42", "selecao": "#4dd0e1",
-    "cabecalho_cor": "#e9ecee",
+    "cabecalho_cor": "#eef1f4",
     # equipamentos "de verdade" (B0.25)
-    "chassi": "#23282e", "chassi_borda": "#2f363d", "chassi_titulo": "#1d2126",
-    "bandeja": "#1b1f24", "adaptador": "#2a3037", "adaptador_borda": "#4a545e",
-    "slot": "#11161b", "vazio": "#3a424a", "led_off": "#2f363d", "numero": "#7fb3ff",
+    "chassi": "#1f252c", "chassi_borda": "#323b45", "chassi_titulo": "#191e24",
+    "bandeja": "#161b20", "adaptador": "#2a3138", "adaptador_borda": "#4a545e",
+    "slot": "#0d1115", "vazio": "#3a424a", "led_off": "#2f363d", "numero": "#7fb3ff",
     "sfp": "#4dd0e1", "fusao_ok": "#d7dde2", "cordao": "#e0b300", "ferrolho": "#8a949c",
     # polimento do conector, nas cores de mercado: APC verde, UPC azul
     "apc": "#3fbf6a", "upc": "#4a8fe7",
     # cores da janela (tkinter)
-    "ui_fundo": "#15181b", "ui_painel": "#1d2126", "ui_borda": "#2c333a",
-    "ui_texto": "#e9ecee", "ui_texto_fraco": "#8b98a2", "ui_acento": "#4dd0e1",
-    "ui_acento_texto": "#10272b", "ui_campo": "#20262c", "ui_hover": "#262d34",
+    "ui_fundo": "#161a1f", "ui_painel": "#1e242b", "ui_borda": "#2a323b",
+    "ui_texto": "#eef1f4", "ui_texto_fraco": "#8b98a4", "ui_acento": "#4dd0e1",
+    "ui_acento_texto": "#0b2529", "ui_campo": "#11151a", "ui_hover": "#262e37",
+    "ui_profundo": "#0e1115",
     "ui_erro": "#e5736a", "ui_aviso": "#d9a441", "ui_ok": "#53c08d",
 }
 
@@ -1466,6 +1467,7 @@ TEMA_LINHO = {
     "ui_fundo": "#faf9f7", "ui_painel": "#ffffff", "ui_borda": "#e4e0d9",
     "ui_texto": "#1c1b19", "ui_texto_fraco": "#8d857a", "ui_acento": "#2f6f5e",
     "ui_acento_texto": "#ffffff", "ui_campo": "#ffffff", "ui_hover": "#f1efea",
+    "ui_profundo": "#f3f1ed",
     "ui_erro": "#b4453c", "ui_aviso": "#b98b2e", "ui_ok": "#2f6f5e",
 }
 
@@ -4275,29 +4277,67 @@ class DialogNovoDiagrama(DialogoBase):
         self.resultado = (tipo, self.e_nome.get().strip(), bool(self.var_mapa.get()))
 
 
+def misturar(cor_a, cor_b, fracao):
+    """Mistura duas cores '#rrggbb' (fracao=0 -> a, 1 -> b)."""
+    a = [int(cor_a[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(cor_b[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#%02x%02x%02x" % tuple(round(x + (y - x) * fracao) for x, y in zip(a, b))
+
+
+# cor de cada tipo de local (selo na lista e, depois, o pino no mapa)
+COR_LOCAL = {"POP": "#b39dfa", "CEO": "#f2b84b", "CTO": "#4dd0e1"}
+
+
+class Selo(tk.Label):
+    """Etiqueta pequena colorida: POP / CEO / CTO."""
+
+    def __init__(self, pai, texto, cor, fundo, fonte):
+        super().__init__(pai, text=texto, fg=cor, bg=misturar(fundo, cor, 0.16),
+                         font=(fonte, 7, "bold"), padx=6, pady=1)
+
+
 class LinhaLista(tk.Frame):
-    """Uma linha clicavel das listas da tela inicial: icone, titulo, detalhe
-    embaixo e um texto a direita. Clique seleciona, duplo clique abre."""
+    """Linha clicavel das listas da tela inicial. Clique seleciona, duplo
+    clique abre.
+    estilo 'lista': linha da coluna das cidades (selecionada = barra de cor
+    a esquerda); 'cartao': cartao com borda, na area dos diagramas."""
 
     def __init__(self, pai, tema, icone, titulo, detalhe="", direita="", ao_clicar=None,
-                 ao_duplo=None, fonte="TkDefaultFont"):
-        super().__init__(pai, bg=tema["ui_fundo"], cursor="hand2")
-        self.tema, self.selecionado = tema, False
+                 ao_duplo=None, fonte="TkDefaultFont", estilo="lista", selo=None,
+                 fonte_titulo=None):
+        self.tema, self.estilo, self.selecionado = tema, estilo, False
         self.nome_icone = icone
-        self.img = tk.Label(self, image=nix_ui.icone(icone, "fraco"), bg=tema["ui_fundo"])
-        self.img.grid(row=0, column=0, rowspan=2, padx=(10, 12), pady=9, sticky="n")
-        self.lbl_titulo = tk.Label(self, text=titulo, bg=tema["ui_fundo"], fg=tema["ui_texto"],
-                                   anchor="w", font=(fonte, 10))
-        self.lbl_titulo.grid(row=0, column=1, sticky="we", pady=(8, 0))
-        self.lbl_detalhe = tk.Label(self, text=detalhe, bg=tema["ui_fundo"],
+        cartao = estilo == "cartao"
+        self.cor_base = tema["ui_painel"] if cartao else tema["ui_fundo"]
+        super().__init__(pai, bg=self.cor_base, cursor="hand2",
+                         highlightthickness=1 if cartao else 0,
+                         highlightbackground=tema["ui_borda"], highlightcolor=tema["ui_borda"])
+        self.barra = tk.Frame(self, bg=self.cor_base, width=3)
+        self.barra.grid(row=0, column=0, rowspan=2, sticky="ns")
+        self.img = tk.Label(self, image=nix_ui.icone(icone, "fraco"), bg=self.cor_base)
+        self.img.grid(row=0, column=1, rowspan=2, padx=(12 if cartao else 10, 12),
+                      pady=12 if cartao else 9, sticky="n")
+        linha_titulo = tk.Frame(self, bg=self.cor_base)
+        linha_titulo.grid(row=0, column=2, sticky="we", pady=(11 if cartao else 8, 0))
+        self.selo = None
+        if selo:
+            self.selo = Selo(linha_titulo, selo[0], selo[1], self.cor_base, fonte)
+            self.selo.pack(side="left", padx=(0, 8))
+        self.lbl_titulo = tk.Label(linha_titulo, text=titulo, bg=self.cor_base,
+                                   fg=tema["ui_texto"], anchor="w",
+                                   font=(fonte_titulo or fonte, 10))
+        self.lbl_titulo.pack(side="left")
+        self.lbl_detalhe = tk.Label(self, text=detalhe, bg=self.cor_base,
                                     fg=tema["ui_texto_fraco"], anchor="w", font=(fonte, 8))
-        self.lbl_detalhe.grid(row=1, column=1, sticky="we", pady=(0, 8))
-        self.lbl_direita = tk.Label(self, text=direita, bg=tema["ui_fundo"],
-                                    fg=tema["ui_texto_fraco"], anchor="e", font=(fonte, 8))
-        self.lbl_direita.grid(row=0, column=2, rowspan=2, padx=(8, 12))
-        self.columnconfigure(1, weight=1)
-        self.partes = (self, self.img, self.lbl_titulo, self.lbl_detalhe, self.lbl_direita)
-        for parte in self.partes:
+        self.lbl_detalhe.grid(row=1, column=2, sticky="we", pady=(2, 11 if cartao else 8))
+        self.lbl_direita = tk.Label(self, text=direita, bg=self.cor_base,
+                                    fg=tema["ui_texto_fraco"], anchor="e", justify="right",
+                                    font=(fonte, 8))
+        self.lbl_direita.grid(row=0, column=3, rowspan=2, padx=(8, 14))
+        self.columnconfigure(2, weight=1)
+        self._fundos = (self, self.img, linha_titulo, self.lbl_titulo, self.lbl_detalhe,
+                        self.lbl_direita)
+        for parte in self._fundos + ((self.selo,) if self.selo else ()):
             parte.bind("<Enter>", lambda _e: self._pintar(True))
             parte.bind("<Leave>", lambda _e: self._pintar(False))
             if ao_clicar:
@@ -4307,9 +4347,20 @@ class LinhaLista(tk.Frame):
 
     def _pintar(self, hover=False):
         t = self.tema
-        fundo = t["ui_painel"] if (self.selecionado or hover) else t["ui_fundo"]
-        for parte in self.partes:
+        if self.selecionado:
+            fundo = misturar(self.cor_base, t["ui_acento"], 0.10)
+        elif hover:
+            fundo = t["ui_hover"]
+        else:
+            fundo = self.cor_base
+        for parte in self._fundos:
             parte.configure(bg=fundo)
+        if self.selo is not None:
+            self.selo.configure(bg=misturar(fundo, self.selo.cget("fg"), 0.16))
+        self.barra.configure(bg=t["ui_acento"] if self.selecionado else fundo)
+        if self.estilo == "cartao":
+            self.configure(highlightbackground=t["ui_acento"] if self.selecionado
+                           else (t["ui_texto_fraco"] if hover else t["ui_borda"]))
         self.img.configure(image=nix_ui.icone(self.nome_icone,
                                               "acento" if self.selecionado else
                                               ("texto" if hover else "fraco")))
@@ -4324,15 +4375,16 @@ class ListaRolavel(tk.Frame):
     """Coluna com rolagem (Canvas + Frame), a roda do mouse funciona em cima
     de qualquer linha."""
 
-    def __init__(self, pai, tema):
-        super().__init__(pai, bg=tema["ui_fundo"])
+    def __init__(self, pai, tema, fundo=None):
+        fundo = fundo or tema["ui_fundo"]
+        super().__init__(pai, bg=fundo)
         self.tema = tema
         barra = ttk.Scrollbar(self, orient="vertical")
-        self.tela = tk.Canvas(self, bg=tema["ui_fundo"], highlightthickness=0, bd=0,
+        self.tela = tk.Canvas(self, bg=fundo, highlightthickness=0, bd=0,
                               yscrollcommand=nix_ui.rolagem_automatica(barra))
         barra.configure(command=self.tela.yview)
         self.tela.pack(side="left", fill="both", expand=True)
-        self.corpo = tk.Frame(self.tela, bg=tema["ui_fundo"])
+        self.corpo = tk.Frame(self.tela, bg=fundo)
         janela = self.tela.create_window(0, 0, window=self.corpo, anchor="nw")
         self.corpo.bind("<Configure>", lambda _e: self.tela.configure(
             scrollregion=self.tela.bbox("all")))
@@ -4362,15 +4414,39 @@ class ListaRolavel(tk.Frame):
 
 def _quando(segundos):
     try:
-        return time.strftime("%d/%m/%Y %H:%M", time.localtime(segundos))
+        return time.strftime("%d/%m/%Y  %H:%M", time.localtime(segundos))
     except (OverflowError, OSError, ValueError):
         return ""
+
+
+def marca_wordmark(pai, tema, fonte_titulo, fonte, tamanho_logo=48, subtitulo=True):
+    """Marca + 'WaspFiber' (Fiber na cor de destaque) + subtitulo."""
+    caixa = tk.Frame(pai, bg=pai.cget("bg"))
+    tk.Label(caixa, image=nix_ui.logo(tamanho_logo), bg=pai.cget("bg")).pack(side="left")
+    textos = tk.Frame(caixa, bg=pai.cget("bg"))
+    textos.pack(side="left", padx=(12, 0))
+    nome = tk.Frame(textos, bg=pai.cget("bg"))
+    nome.pack(anchor="w")
+    tk.Label(nome, text="Wasp", bg=pai.cget("bg"), fg=tema["ui_texto"],
+             font=(fonte_titulo, 17), bd=0, padx=0).pack(side="left")
+    tk.Label(nome, text="Fiber", bg=pai.cget("bg"), fg=tema["ui_acento"],
+             font=(fonte_titulo, 17), bd=0, padx=0).pack(side="left")
+    tk.Label(nome, text=VERSAO, bg=misturar(pai.cget("bg"), tema["ui_acento"], 0.14),
+             fg=tema["ui_acento"], font=(fonte, 7, "bold"), padx=6).pack(side="left",
+                                                                      padx=(10, 0), pady=(4, 0))
+    if subtitulo:
+        tk.Label(textos, text="Documentacao de redes de fibra optica (FTTH)",
+                 bg=pai.cget("bg"), fg=tema["ui_texto_fraco"], font=(fonte, 8)).pack(anchor="w")
+    return caixa
 
 
 class TelaInicio(tk.Frame):
     """Primeira tela do programa: escolher a cidade (pasta) e o diagrama
     (POP / CEO / CTO) - ou cadastrar uma cidade / um diagrama novo. Fica por
-    cima do editor e some quando um diagrama e aberto."""
+    cima do editor e some quando um diagrama e aberto.
+
+    Visual (B0.37): moldura (cabecalho e coluna das cidades) no tom da
+    janela, area dos diagramas mais escura e os diagramas em cartoes."""
 
     def __init__(self, app):
         t = TEMA
@@ -4381,68 +4457,73 @@ class TelaInicio(tk.Frame):
         self.linhas_diagrama = {}
         self.diagrama_escolhido = None
         BotaoIcone = nix_ui.BotaoIcone
-        fonte = app.fonte_ui
+        fonte, titulo = app.fonte_ui, app.fonte_titulo
+        profundo = t["ui_profundo"]
 
-        # ----- topo -----
+        # ----- cabecalho -----
         topo = tk.Frame(self, bg=t["ui_fundo"])
-        topo.pack(fill="x", padx=24, pady=(18, 8))
-        tk.Label(topo, image=nix_ui.logo(32), bg=t["ui_fundo"]).pack(side="left")
-        tk.Label(topo, text=APP_NOME, bg=t["ui_fundo"], fg=t["ui_texto"],
-                 font=(fonte, 15)).pack(side="left", padx=(10, 6))
-        tk.Label(topo, text=VERSAO, bg=t["ui_fundo"], fg=t["ui_texto_fraco"],
-                 font=(fonte, 9)).pack(side="left", pady=(6, 0))
+        topo.pack(fill="x", padx=26, pady=(16, 14))
+        marca_wordmark(topo, t, titulo, fonte).pack(side="left")
         BotaoIcone(topo, t, "circle-help", texto="Como usar",
                    comando=app.acao_ajuda).pack(side="right")
-        BotaoIcone(topo, t, "list-tree", texto="Ver a rede de exemplo",
-                   comando=app.acao_exemplo).pack(side="right", padx=(0, 6))
+        BotaoIcone(topo, t, "list-tree", texto="Rede de exemplo",
+                   comando=app.acao_exemplo).pack(side="right", padx=(0, 4))
         tk.Frame(self, bg=t["ui_borda"], height=1).pack(fill="x")
 
         corpo = tk.Frame(self, bg=t["ui_fundo"])
         corpo.pack(fill="both", expand=True)
 
         # ----- coluna das cidades -----
-        esquerda = tk.Frame(corpo, bg=t["ui_fundo"], width=360)
+        esquerda = tk.Frame(corpo, bg=t["ui_fundo"], width=340)
         esquerda.pack(side="left", fill="y")
         esquerda.pack_propagate(False)
         cab = tk.Frame(esquerda, bg=t["ui_fundo"])
-        cab.pack(fill="x", padx=(24, 12), pady=(18, 10))
-        tk.Label(cab, text=espacado("CIDADES"), bg=t["ui_fundo"], fg=t["ui_texto_fraco"],
-                 font=(fonte, 8)).pack(side="left")
+        cab.pack(fill="x", padx=(24, 16), pady=(22, 12))
+        tk.Label(cab, text="Cidades", bg=t["ui_fundo"], fg=t["ui_texto"],
+                 font=(titulo, 12)).pack(side="left")
+        self.lbl_qtd_cidades = tk.Label(cab, text="", bg=t["ui_fundo"], fg=t["ui_texto_fraco"],
+                                        font=(fonte, 9))
+        self.lbl_qtd_cidades.pack(side="left", padx=(8, 0), pady=(2, 0))
         botoes = tk.Frame(esquerda, bg=t["ui_fundo"])
-        botoes.pack(fill="x", padx=(20, 12), pady=(0, 10))
+        botoes.pack(fill="x", padx=(22, 16), pady=(0, 12))
         BotaoIcone(botoes, t, "plus", texto="Nova cidade", variante="acento",
                    comando=self.nova_cidade).pack(side="left")
-        BotaoIcone(botoes, t, "folder-open", texto="Abrir pasta de cidade", variante="normal",
+        BotaoIcone(botoes, t, "folder-open", texto="Abrir pasta", variante="normal",
                    comando=self.abrir_pasta_cidade).pack(side="left", padx=(6, 0))
         self.lista_cidades = ListaRolavel(esquerda, t)
-        self.lista_cidades.pack(fill="both", expand=True, padx=(12, 6))
-        rodape = tk.Frame(esquerda, bg=t["ui_fundo"])
-        rodape.pack(fill="x", padx=(24, 12), pady=(8, 14))
-        tk.Label(rodape, text="PASTA DAS CIDADES", bg=t["ui_fundo"], fg=t["ui_texto_fraco"],
-                 font=(fonte, 7)).pack(anchor="w")
-        linha = tk.Frame(rodape, bg=t["ui_fundo"])
-        linha.pack(fill="x")
-        self.lbl_pasta = tk.Label(linha, text="", bg=t["ui_fundo"], fg=t["ui_texto"],
-                                  font=(fonte, 8), anchor="w", justify="left", wraplength=250)
+        self.lista_cidades.pack(fill="both", expand=True, padx=(14, 8))
+
+        rodape = tk.Frame(esquerda, bg=t["ui_painel"])
+        rodape.pack(fill="x", padx=16, pady=16)
+        dentro = tk.Frame(rodape, bg=t["ui_painel"])
+        dentro.pack(fill="x", padx=12, pady=10)
+        tk.Label(dentro, text="PASTA DAS CIDADES", bg=t["ui_painel"], fg=t["ui_texto_fraco"],
+                 font=(fonte, 7, "bold")).pack(anchor="w")
+        linha = tk.Frame(dentro, bg=t["ui_painel"])
+        linha.pack(fill="x", pady=(3, 0))
+        self.lbl_pasta = tk.Label(linha, text="", bg=t["ui_painel"], fg=t["ui_texto"],
+                                  font=(fonte, 8), anchor="w", justify="left", wraplength=230)
         self.lbl_pasta.pack(side="left", fill="x", expand=True)
         BotaoIcone(linha, t, "folder-search", dica="Trocar a pasta das cidades",
                    comando=self.trocar_pasta).pack(side="right")
 
         tk.Frame(corpo, bg=t["ui_borda"], width=1).pack(side="left", fill="y")
 
-        # ----- coluna dos diagramas -----
-        self.direita = tk.Frame(corpo, bg=t["ui_fundo"])
+        # ----- area dos diagramas (mais escura) -----
+        self.direita = tk.Frame(corpo, bg=profundo)
         self.direita.pack(side="left", fill="both", expand=True)
-        self.cab_cidade = tk.Frame(self.direita, bg=t["ui_fundo"])
-        self.cab_cidade.pack(fill="x", padx=28, pady=(18, 6))
-        self.lbl_cidade = tk.Label(self.cab_cidade, text="", bg=t["ui_fundo"], fg=t["ui_texto"],
-                                   font=(fonte, 14), anchor="w")
+        self.cab_cidade = tk.Frame(self.direita, bg=profundo)
+        self.cab_cidade.pack(fill="x", padx=32, pady=(24, 4))
+        self.lbl_cidade = tk.Label(self.cab_cidade, text="", bg=profundo, fg=t["ui_texto"],
+                                   font=(titulo, 20), anchor="w")
         self.lbl_cidade.pack(anchor="w")
-        self.lbl_cidade_info = tk.Label(self.cab_cidade, text="", bg=t["ui_fundo"],
+        self.resumo = tk.Frame(self.cab_cidade, bg=profundo)
+        self.resumo.pack(anchor="w", pady=(6, 0))
+        self.lbl_cidade_info = tk.Label(self.cab_cidade, text="", bg=profundo,
                                         fg=t["ui_texto_fraco"], font=(fonte, 8), anchor="w")
-        self.lbl_cidade_info.pack(anchor="w", pady=(2, 0))
-        self.barra_diagramas = tk.Frame(self.direita, bg=t["ui_fundo"])
-        self.barra_diagramas.pack(fill="x", padx=24, pady=(6, 8))
+        self.lbl_cidade_info.pack(anchor="w", pady=(8, 0))
+        self.barra_diagramas = tk.Frame(self.direita, bg=profundo)
+        self.barra_diagramas.pack(fill="x", padx=30, pady=(14, 10))
         BotaoIcone(self.barra_diagramas, t, "plus", texto="Novo diagrama", variante="acento",
                    comando=self.novo_diagrama).pack(side="left")
         self.bt_abrir = BotaoIcone(self.barra_diagramas, t, "folder-open", texto="Abrir",
@@ -4450,22 +4531,23 @@ class TelaInicio(tk.Frame):
         self.bt_abrir.pack(side="left", padx=(6, 0))
         BotaoIcone(self.barra_diagramas, t, "folder-search", texto="Mostrar a pasta",
                    comando=self.mostrar_pasta).pack(side="left", padx=(6, 0))
-        BotaoIcone(self.barra_diagramas, t, "x", dica="Tirar esta cidade da lista "
-                   "(nao apaga nada)", comando=self.esquecer).pack(side="right")
-        self.lista_diagramas = ListaRolavel(self.direita, t)
-        self.lista_diagramas.pack(fill="both", expand=True, padx=(16, 10), pady=(0, 14))
+        BotaoIcone(self.barra_diagramas, t, "x", texto="Tirar da lista",
+                   dica="Tira esta cidade da lista (nao apaga nada)",
+                   comando=self.esquecer).pack(side="right")
+        self.lista_diagramas = ListaRolavel(self.direita, t, fundo=profundo)
+        self.lista_diagramas.pack(fill="both", expand=True, padx=(30, 18), pady=(0, 18))
 
         # convite quando nao ha nenhuma cidade
-        self.vazio = tk.Frame(self.direita, bg=t["ui_fundo"])
-        tk.Label(self.vazio, image=nix_ui.logo_emblema(), bg=t["ui_fundo"]).pack(pady=(10, 14))
-        tk.Label(self.vazio, text="Comece cadastrando uma cidade", bg=t["ui_fundo"],
-                 fg=t["ui_texto"], font=(fonte, 13)).pack()
+        self.vazio = tk.Frame(self.direita, bg=profundo)
+        tk.Label(self.vazio, image=nix_ui.logo_emblema(), bg=profundo).pack(pady=(0, 18))
+        tk.Label(self.vazio, text="Comece cadastrando uma cidade", bg=profundo,
+                 fg=t["ui_texto"], font=(titulo, 15)).pack()
         tk.Label(self.vazio, text="Cada cidade e uma pasta com os diagramas dos POPs, caixas "
                                   "de emenda e CTOs dela.\nUse uma pasta compartilhada no "
                                   "servidor pra equipe toda trabalhar nas mesmas cidades.",
-                 bg=t["ui_fundo"], fg=t["ui_texto_fraco"], font=(fonte, 9),
-                 justify="center").pack(pady=(6, 14))
-        caixa = tk.Frame(self.vazio, bg=t["ui_fundo"])
+                 bg=profundo, fg=t["ui_texto_fraco"], font=(fonte, 9),
+                 justify="center").pack(pady=(8, 18))
+        caixa = tk.Frame(self.vazio, bg=profundo)
         caixa.pack()
         BotaoIcone(caixa, t, "plus", texto="Nova cidade", variante="acento",
                    comando=self.nova_cidade).pack(side="left")
@@ -4487,20 +4569,21 @@ class TelaInicio(tk.Frame):
 
     def atualizar(self):
         pasta = cidades.pasta_provedor()
-        self.lbl_pasta.configure(text=pasta or "(ainda nao escolhida)")
+        self.lbl_pasta.configure(text=pasta or "Ainda nao escolhida - crie ou abra uma cidade.")
         lista = cidades.cidades_conhecidas()
+        self.lbl_qtd_cidades.configure(text=str(len(lista)) if lista else "")
         self.lista_cidades.limpar()
         self.linhas_cidade = {}
         for cidade in lista:
             qtd = len(cidades.listar_diagramas(cidade["pasta"]))
             detalhe = "%d diagrama%s" % (qtd, "" if qtd == 1 else "s")
             if cidade.get("fora_da_pasta"):
-                detalhe += "   ·   " + cidade["pasta"]
+                detalhe += "  ·  fora da pasta das cidades"
             linha = LinhaLista(self.lista_cidades.corpo, TEMA, "building-2", cidade["titulo"],
                                detalhe, ao_clicar=lambda c=cidade: self.escolher_cidade(c),
                                ao_duplo=lambda c=cidade: self.escolher_cidade(c),
                                fonte=self.app.fonte_ui)
-            linha.pack(fill="x")
+            linha.pack(fill="x", pady=1)
             self.linhas_cidade[os.path.normcase(cidade["pasta"])] = linha
         self.lista_cidades.ligar_roda()
         escolhida = None
@@ -4521,13 +4604,13 @@ class TelaInicio(tk.Frame):
         if sim:
             for parte in (self.cab_cidade, self.barra_diagramas, self.lista_diagramas):
                 parte.pack_forget()
-            self.vazio.place(relx=0.5, rely=0.42, anchor="center")
+            self.vazio.place(relx=0.5, rely=0.45, anchor="center")
         else:
             self.vazio.place_forget()
             if not self.cab_cidade.winfo_ismapped():
-                self.cab_cidade.pack(fill="x", padx=28, pady=(18, 6))
-                self.barra_diagramas.pack(fill="x", padx=24, pady=(6, 8))
-                self.lista_diagramas.pack(fill="both", expand=True, padx=(16, 10), pady=(0, 14))
+                self.cab_cidade.pack(fill="x", padx=32, pady=(24, 4))
+                self.barra_diagramas.pack(fill="x", padx=30, pady=(14, 10))
+                self.lista_diagramas.pack(fill="both", expand=True, padx=(30, 18), pady=(0, 18))
 
     def escolher_cidade(self, cidade, registrar=True):
         self.cidade = cidade
@@ -4540,20 +4623,52 @@ class TelaInicio(tk.Frame):
         self.lbl_cidade_info.configure(text=cidade["pasta"])
         self.listar_diagramas()
 
+    def _montar_resumo(self, itens):
+        """'1 POP  2 CEO  5 CTO  ·  2 sem localizacao' com os selos coloridos."""
+        t = TEMA
+        profundo = t["ui_profundo"]
+        for filho in self.resumo.winfo_children():
+            filho.destroy()
+        if not itens:
+            tk.Label(self.resumo, text="Nenhum diagrama ainda", bg=profundo,
+                     fg=t["ui_texto_fraco"], font=(self.app.fonte_ui, 9)).pack(side="left")
+            return
+        for tipo in ("POP", "CEO", "CTO"):
+            qtd = len([i for i in itens if i["tipo"] == tipo])
+            if qtd:
+                Selo(self.resumo, tipo, COR_LOCAL[tipo], profundo,
+                     self.app.fonte_ui).pack(side="left")
+                tk.Label(self.resumo, text=str(qtd), bg=profundo, fg=t["ui_texto"],
+                         font=(self.app.fonte_ui, 9)).pack(side="left", padx=(5, 14))
+        outros = len([i for i in itens if i["tipo"] not in COR_LOCAL])
+        if outros:
+            tk.Label(self.resumo, text="%d sem tipo" % outros, bg=profundo,
+                     fg=t["ui_texto_fraco"], font=(self.app.fonte_ui, 9)).pack(side="left",
+                                                                               padx=(0, 14))
+        sem_local = len([i for i in itens if not i["tem_coordenada"] and not i["erro"]])
+        if sem_local:
+            tk.Label(self.resumo, text="%d sem localizacao no mapa" % sem_local, bg=profundo,
+                     fg=t["ui_aviso"], font=(self.app.fonte_ui, 9)).pack(side="left")
+
     def listar_diagramas(self):
         t = TEMA
+        profundo = t["ui_profundo"]
         self.lista_diagramas.limpar()
         self.linhas_diagrama = {}
         self.diagrama_escolhido = None
         itens = cidades.listar_diagramas(self.cidade["pasta"])
+        self._montar_resumo(itens)
         if not itens:
-            caixa = tk.Frame(self.lista_diagramas.corpo, bg=t["ui_fundo"])
-            caixa.pack(fill="x", pady=40)
-            tk.Label(caixa, text="Nenhum diagrama nesta cidade ainda.", bg=t["ui_fundo"],
-                     fg=t["ui_texto"], font=(self.app.fonte_ui, 11)).pack()
+            caixa = tk.Frame(self.lista_diagramas.corpo, bg=t["ui_painel"],
+                             highlightthickness=1, highlightbackground=t["ui_borda"])
+            caixa.pack(fill="x", pady=(4, 0))
+            tk.Label(caixa, text="Nenhum diagrama nesta cidade ainda", bg=t["ui_painel"],
+                     fg=t["ui_texto"], font=(self.app.fonte_titulo, 11)).pack(pady=(26, 4))
             tk.Label(caixa, text="Crie o primeiro: o POP, uma caixa de emenda ou uma CTO.",
-                     bg=t["ui_fundo"], fg=t["ui_texto_fraco"],
-                     font=(self.app.fonte_ui, 9)).pack(pady=(4, 0))
+                     bg=t["ui_painel"], fg=t["ui_texto_fraco"],
+                     font=(self.app.fonte_ui, 9)).pack(pady=(0, 14))
+            nix_ui.BotaoIcone(caixa, t, "plus", texto="Novo diagrama", variante="acento",
+                              comando=self.novo_diagrama).pack(pady=(0, 26))
         for item in itens:
             partes = []
             if item["erro"]:
@@ -4566,19 +4681,17 @@ class TelaInicio(tk.Frame):
                     item["fusoes"]))
                 if not item["tem_coordenada"]:
                     partes.append("sem localizacao no mapa")
-            titulo = ("%s   %s" % (item["tipo"], item["titulo"])) if item["tipo"] else item["titulo"]
+            selo = (item["tipo"], COR_LOCAL[item["tipo"]]) if item["tipo"] in COR_LOCAL else None
             linha = LinhaLista(self.lista_diagramas.corpo, t,
-                               ICONE_LOCAL.get(item["tipo"], "file-text"), titulo,
+                               ICONE_LOCAL.get(item["tipo"], "file-text"), item["titulo"],
                                "   ·   ".join(partes), "alterado em\n" + _quando(item["modificado"]),
                                ao_clicar=lambda i=item: self._escolher_diagrama(i),
                                ao_duplo=lambda i=item: self.app.abrir_diagrama(i["caminho"]),
-                               fonte=self.app.fonte_ui)
-            linha.pack(fill="x")
+                               fonte=self.app.fonte_ui, fonte_titulo=self.app.fonte_titulo,
+                               estilo="cartao", selo=selo)
+            linha.pack(fill="x", pady=4)
             self.linhas_diagrama[item["caminho"]] = linha
         self.lista_diagramas.ligar_roda()
-        qtd = len(itens)
-        self.lbl_cidade_info.configure(text="%s      %d diagrama%s" % (
-            self.cidade["pasta"], qtd, "" if qtd == 1 else "s"))
 
     def _escolher_diagrama(self, item):
         self.diagrama_escolhido = item["caminho"]
@@ -4671,10 +4784,9 @@ class TelaInicio(tk.Frame):
         if dentro:
             messagebox.showinfo("Cidade", "Esta cidade esta dentro da pasta das cidades, entao "
                                           "ela continua na lista. Nada foi apagado.")
-        gravar_prefs = cidades.gravar_prefs
         if cidades.ultima_cidade() and os.path.normcase(cidades.ultima_cidade()) == \
                 os.path.normcase(self.cidade["pasta"]):
-            gravar_prefs({"ultima_cidade": ""})
+            cidades.gravar_prefs({"ultima_cidade": ""})
         self.cidade = None
         self.atualizar()
 
@@ -4966,8 +5078,11 @@ class App(tk.Tk):
                 except tk.TclError:
                     pass
             self.fonte_ui = familia if familia != "TkDefaultFont" else "TkDefaultFont"
+            self.fonte_titulo = ("Segoe UI Semibold" if "Segoe UI Semibold" in disponiveis
+                                 else self.fonte_ui)
         except Exception:
             self.fonte_ui = "TkDefaultFont"
+            self.fonte_titulo = "TkDefaultFont"
 
         estilo = ttk.Style(self)
         try:
@@ -5132,13 +5247,14 @@ class App(tk.Tk):
         # ----- barra do topo -----
         barra = tk.Frame(self, bg=t["ui_fundo"])
         barra.pack(fill="x", padx=14, pady=10)
+        tk.Frame(self, bg=t["ui_borda"], height=1).pack(fill="x")
         BotaoIcone(barra, t, "house", dica="Inicio: cidades e diagramas",
                    comando=self.mostrar_inicio).pack(side="left", padx=(0, 8))
         marca = tk.Label(barra, image=nix_ui.logo(32), bg=t["ui_fundo"])
         marca.pack(side="left")
         nix_ui.Tooltip(marca, "%s %s" % (APP_NOME, VERSAO), t)
         self.lbl_arquivo = tk.Label(barra, text="", bg=t["ui_fundo"], fg=t["ui_texto"],
-                                    font=(self.fonte_ui, 10))
+                                    font=(self.fonte_titulo, 10))
         self.lbl_arquivo.pack(side="left", padx=(10, 0))
         self.lbl_alterado = tk.Label(barra, text="", bg=t["ui_fundo"], fg=t["ui_acento"],
                                      font=(self.fonte_ui, 10))
@@ -5146,7 +5262,7 @@ class App(tk.Tk):
         nix_ui.Tooltip(self.lbl_alterado, "Alteracoes nao salvas (Ctrl+S)", t)
         # B0.34: onde fica este diagrama (POP / caixa de emenda / CTO)
         self.botao_local = BotaoIcone(barra, t, "map-pin", texto="Definir localizacao",
-                                      comando=self.acao_local)
+                                      comando=self.acao_local, variante="normal")
         self.botao_local.pack(side="left", padx=(14, 0))
         self.dica_local = nix_ui.Tooltip(self.botao_local, "Localizacao do diagrama no mapa", t)
 
@@ -5161,7 +5277,8 @@ class App(tk.Tk):
                    comando=self.acao_desfazer).pack(side="right")
 
         # campo de comando no meio: clicar (ou Ctrl+K) abre a paleta
-        self.campo_comando = tk.Frame(barra, bg=t["ui_painel"], cursor="xterm")
+        self.campo_comando = tk.Frame(barra, bg=t["ui_painel"], cursor="xterm",
+                                      highlightthickness=1, highlightbackground=t["ui_borda"])
         self.campo_comando.pack(side="left", expand=True, padx=40)
         partes = (tk.Label(self.campo_comando, image=nix_ui.icone("search", "fraco"),
                            bg=t["ui_painel"]),
