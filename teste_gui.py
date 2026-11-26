@@ -2,6 +2,7 @@
 desfazer, busca, lote, duplicar, organizar, pendencias e exportacoes.
 Rodar:  xvfb-run -a python teste_gui.py"""
 import os
+import sys
 import types
 import tkinter.messagebox as mb
 import tkinter.simpledialog as sd
@@ -38,9 +39,22 @@ mb.showwarning = lambda *a, **k: None
 mb.showerror = lambda *a, **k: None
 fttx.perguntar_texto = lambda *a, **k: "TESTE"
 
+# servidor WaspFiber de teste, aqui mesmo (sem internet)
+import threading
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "servidor"))
+import waspfiber_servidor as ws
+_dados_srv = tempfile.mkdtemp(prefix="waspfiber_dados_")
+srv = ws.criar_servidor(_dados_srv, "127.0.0.1", 0)
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+URL_SRV = "http://127.0.0.1:%d" % srv.server_address[1]
+srv.RequestHandlerClass.armazem.criar_empresa("junior", "Junior Telecom")
+srv.RequestHandlerClass.armazem.definir_usuario("junior", "tulio", "Tulio", "senha-teste-123")
+srv.RequestHandlerClass.armazem.definir_usuario("junior", "ana", "Ana", "senha-teste-456")
+
 app = App()
 app.update()
 inicio_ao_abrir = app.tela_inicio.visivel()
+login_ao_abrir = app.tela_inicio.login.winfo_ismapped()
 app.acao_exemplo()
 app.update()
 
@@ -95,9 +109,18 @@ checar(rec is not None, "autosave gravado a cada alteracao")
 mb.askyesnocancel = lambda *a, **k: None
 checar(app._confirmar_descarte("teste") is False, "cancelar bloqueia a acao")
 mb.askyesnocancel = lambda *a, **k: False
-app.caminho_atual = PASTA + "/gui_rede.json"
+# salvar agora vai pro servidor (B0.39): empresa de teste so pra isto
+import waspfiber_nuvem as _nv
+srv.RequestHandlerClass.armazem.criar_empresa("testes", "Testes")
+srv.RequestHandlerClass.armazem.definir_usuario("testes", "gui", "GUI", "senha-teste-789")
+app.conexao = _nv.Conexao.entrar(URL_SRV, "testes", "gui", "senha-teste-789")
+_cid = app.conexao.criar_cidade("Teste", "SP")
+_d = app.conexao.criar_diagrama(_cid["id"], "Rede GUI", app.rede.to_dict())
+app.documento = {"cidade": _cid, "id": _d["id"], "versao": _d["versao"]}
 app.acao_salvar()
 app.update()
+app.conexao.sair()
+app.conexao = None
 checar(not app.alteracoes_pendentes and fttx.ler_autosave()[0] is None,
        "salvar limpa o aviso e o autosave")
 
@@ -227,14 +250,15 @@ app.update()
 checar(len(app.destaque) == 0, "destaque limpo")
 
 print("== recuperacao ==")
-fttx.gravar_autosave(app.rede, "/tmp/perdido.json")
+fttx.gravar_autosave(app.rede, "", {"cidade": {"id": "x-sp", "titulo": "X - SP"},
+                                    "id": "perdido", "versao": "v1"})
 app2 = App()
 mb.askyesno = lambda *a, **k: True
 _recuperar_original(app2)
 app2.update()
 checar(len(app2.rede.equipamentos) == len(app.rede.equipamentos)
-       and app2.caminho_atual == "/tmp/perdido.json",
-       "recupera o trabalho e lembra o arquivo")
+       and (app2.documento or {}).get("id") == "perdido",
+       "recupera o trabalho e lembra de qual diagrama do servidor era")
 app2.destroy()
 fttx.nix_ui.usar_janela(app)          # (so no teste existem duas janelas principais)
 fttx.apagar_autosave()
@@ -587,67 +611,140 @@ checar(res2.get("config_fonte") == "satelite", "lembra a escolha de fonte")
 checar(not any("Chave do Google" in r[1] for r in app.resultados_paleta("chave")),
        "paleta sem chave do Google")
 
-print("== tela inicial (B0.36) ==")
-import waspfiber_cidades as cid
-checar(inicio_ao_abrir, "programa abre na tela das cidades")
-checar(not app.tela_inicio.visivel(), "rede de exemplo sai da tela inicial")
+print("== tela inicial e servidor (B0.39) ==")
+import waspfiber_nuvem as nuvem
+checar(inicio_ao_abrir and login_ao_abrir, "programa abre na tela de login do servidor")
+checar(not app.tela_inicio.visivel(), "abrir um diagrama sai da tela inicial")
 app.mostrar_inicio()
 app.update()
-checar(app.tela_inicio.visivel() and not app.rede.equipamentos, "casinha volta pro inicio (rede limpa)")
-checar(app.tela_inicio.vazio.winfo_ismapped(), "sem cidades: convite pra cadastrar a primeira")
+tela = app.tela_inicio
+checar(tela.visivel() and tela.login.winfo_ismapped(), "sem login: mostra o login")
+campos = tela.form["campos"]
+for chave, valor in (("url", URL_SRV), ("empresa", "junior"), ("usuario", "tulio"),
+                     ("senha", "errada")):
+    campos[chave].delete(0, "end")
+    campos[chave].insert(0, valor)
+tela.form["enviar"]()
+app.update()
+checar(app.conexao is None and "incorretos" in tela.form["erro"].cget("text"),
+       "senha errada: mensagem no login", tela.form["erro"].cget("text"))
+campos["senha"].insert(0, "senha-teste-123")
+tela.form["enviar"]()
+app.update()
+checar(app.conexao is not None and not tela.login.winfo_ismapped() and campos["senha"].get() == "",
+       "login certo: entra e limpa a senha")
+checar("Junior Telecom" in tela.lbl_empresa.cget("text"), "mostra a empresa e o usuario",
+       tela.lbl_empresa.cget("text"))
+checar(tela.aviso.winfo_ismapped() and "cidade" in tela.aviso_titulo.cget("text"),
+       "empresa sem cidades: convite pra cadastrar")
 app.abrir_paleta()
 checar(app.paleta is None or not app.paleta.winfo_exists(), "Ctrl+K nao abre por cima do inicio")
-prov = tempfile.mkdtemp(prefix="waspfiber_provedor_")
-cid.definir_pasta_provedor(prov)
-cidade = cid.criar_cidade(prov, "Santos", "SP")
-app.tela_inicio.atualizar()
+
+
+class CidadeFalsa:
+    def __init__(self, parent):
+        self.resultado = ("Santos", "SP")
+
+
+_orig_cidade = fttx.DialogNovaCidade
+fttx.DialogNovaCidade = CidadeFalsa
+tela.nova_cidade()
+fttx.DialogNovaCidade = _orig_cidade
 app.update()
-checar(list(app.tela_inicio.linhas_cidade) == [os.path.normcase(cidade["pasta"])]
-       and not app.tela_inicio.vazio.winfo_ismapped(), "cidade aparece na lista")
-checar(app.tela_inicio.cidade and app.tela_inicio.cidade["titulo"] == "Santos - SP",
-       "primeira cidade ja vem escolhida")
+checar(list(tela.linhas_cidade) == ["santos-sp"] and tela.cidade["titulo"] == "Santos - SP",
+       "nova cidade criada no servidor e escolhida")
 
 
-class DialogoFalso:
+class DiagramaFalso:
     def __init__(self, parent, cidade):
         self.resultado = ("CTO", "CTO Rua A 01", False)
 
 
-_dialogo_original = fttx.DialogNovoDiagrama
-fttx.DialogNovoDiagrama = DialogoFalso
-caminho_cto = app.novo_diagrama(cidade)
+_orig_diag = fttx.DialogNovoDiagrama
+fttx.DialogNovoDiagrama = DiagramaFalso
+did = app.novo_diagrama(tela.cidade)
+fttx.DialogNovoDiagrama = _orig_diag
 app.update()
-fttx.DialogNovoDiagrama = _dialogo_original
-checar(caminho_cto and os.path.isfile(caminho_cto) and os.path.dirname(caminho_cto) == cidade["pasta"],
-       "novo diagrama e criado (e salvo) na pasta da cidade", caminho_cto)
-checar(not app.tela_inicio.visivel() and app.rede.local["tipo"] == "CTO"
-       and app.rede.local["cidade"] == "Santos - SP", "abre o editor com o local preenchido", app.rede.local)
+checar(did == "cto-rua-a-01" and not tela.visivel() and app.documento["id"] == did,
+       "novo diagrama criado no servidor e aberto", app.documento)
+checar(not os.listdir(os.environ["APPDATA"] + "/WaspFiber") or
+       not any(n.endswith(".wasp.json") for n in os.listdir(os.environ["APPDATA"] + "/WaspFiber")),
+       "nada de .wasp.json salvo no computador")
 checar("Santos - SP" in app.lbl_arquivo.cget("text") and "CTO Rua A 01" in app.lbl_arquivo.cget("text"),
        "topo mostra cidade > diagrama", app.lbl_arquivo.cget("text"))
 app.rede.add_equipamento("DIO X", fttx.TIPO_DIO, 12)
 app._marcar_alterado()
-app.acao_salvar()
-app.mostrar_inicio()
-app.update()
-linhas = app.tela_inicio.linhas_diagrama
-checar(list(linhas) == [caminho_cto], "volta pro inicio e o diagrama esta na lista")
-checar("1 equipamento" in linhas[caminho_cto].lbl_detalhe.cget("text"),
-       "lista mostra o que foi salvo", linhas[caminho_cto].lbl_detalhe.cget("text"))
-item = cid.listar_diagramas(cidade["pasta"])[0]
-app.tela_inicio._escolher_diagrama(item)
-app.tela_inicio.abrir_escolhido()
-app.update()
-checar(not app.tela_inicio.visivel() and len(app.rede.equipamentos) == 1, "abre o diagrama escolhido")
-salvo = []
-mb.askyesnocancel = lambda *a, **k: None          # "cancelar" no aviso de nao salvo
+checar(app.acao_salvar() and not app.alteracoes_pendentes, "salvar grava no servidor")
+outra = nuvem.Conexao.entrar(URL_SRV, "junior", "ana", "senha-teste-456")
+nuvem.gravar_sessao(dict(app.conexao.info, url=app.conexao.url, token=app.conexao.token))
+checar(len(outra.abrir("santos-sp", did)["conteudo"]["equipamentos"]) == 1,
+       "outra pessoa ve o que foi salvo")
+dados_ana = outra.abrir("santos-sp", did)
+from waspfiber import Rede
+r_ana = Rede.from_dict(dados_ana["conteudo"])
+r_ana.add_equipamento("DIO da Ana", fttx.TIPO_DIO, 12)
+outra.salvar("santos-sp", did, r_ana.to_dict(), dados_ana["versao"])
 app.rede.add_equipamento("DIO Y", fttx.TIPO_DIO, 12)
 app._marcar_alterado()
+perguntas = []
+mb.askyesnocancel = lambda *a, **k: (perguntas.append(a), True)[1]   # salvar por cima
+checar(app.acao_salvar() and perguntas and "Ana" in perguntas[0][1],
+       "conflito: avisa que a Ana salvou e deixa salvar por cima", perguntas[:1])
+mb.askyesnocancel = lambda *a, **k: False
+
+print("== sem conexao: guarda e envia depois ==")
+url_boa = app.conexao.url
+app.conexao.url = "http://127.0.0.1:9"
+app.rede.add_equipamento("DIO offline", fttx.TIPO_DIO, 12)
+app._marcar_alterado()
+checar(app.acao_salvar() and not app.alteracoes_pendentes and len(nuvem.pendentes()) == 1,
+       "servidor fora: guarda na fila e nao perde nada")
+app.update()
+checar("aguardando envio" in app.lbl_alterado.cget("text"), "topo avisa 'aguardando envio'",
+       app.lbl_alterado.cget("text"))
+app.conexao.url = url_boa
+for _ in range(200):
+    if not app._sincronizando and nuvem.pendentes():
+        app._sincronizar()          # (a automatica pode estar rodando: espera e tenta)
+    app.update()
+    if not app._sincronizando and not nuvem.pendentes():
+        break
+    __import__("time").sleep(0.05)
+checar(nuvem.pendentes() == [] and
+       len(outra.abrir("santos-sp", did)["conteudo"]["equipamentos"]) == 3,
+       "servidor voltou: envia sozinho e apaga a copia temporaria",
+       (len(nuvem.pendentes()), len(outra.abrir("santos-sp", did)["conteudo"]["equipamentos"]),
+        app._sincronizando))
+app.rede.add_equipamento("DIO depois", fttx.TIPO_DIO, 12)
+app._marcar_alterado()
+perguntas.clear()
+mb.askyesnocancel = lambda *a, **k: (perguntas.append(a), None)[1]
+checar(app.acao_salvar() and not perguntas, "depois do envio, salvar de novo nao da conflito")
+mb.askyesnocancel = lambda *a, **k: False
+
 app.mostrar_inicio()
-checar(not app.tela_inicio.visivel() and len(app.rede.equipamentos) == 2,
-       "alteracao nao salva: cancelar fica no editor")
+app.update()
+linhas = tela.linhas_diagrama
+checar(list(linhas) == [did] and "4 equipamentos" in linhas[did].lbl_detalhe.cget("text"),
+       "volta pro inicio e a lista mostra o que esta no servidor", linhas[did].lbl_detalhe.cget("text"))
+checar("Tulio" in linhas[did].lbl_direita.cget("text"), "lista mostra quem alterou",
+       linhas[did].lbl_direita.cget("text"))
+tela._escolher_diagrama({"id": did})
+tela.abrir_escolhido()
+app.update()
+checar(not tela.visivel() and len(app.rede.equipamentos) == 4, "abre o diagrama do servidor")
+mb.askyesnocancel = lambda *a, **k: None
+app.rede.add_equipamento("DIO Z", fttx.TIPO_DIO, 12)
+app._marcar_alterado()
+app.mostrar_inicio()
+checar(not tela.visivel(), "alteracao nao salva: cancelar fica no editor")
 mb.askyesnocancel = lambda *a, **k: False
 app.mostrar_inicio()
-checar(app.tela_inicio.visivel(), "descartar volta pro inicio")
+checar(tela.visivel(), "descartar volta pro inicio")
+tela.sair()
+app.update()
+checar(app.conexao is None and tela.login.winfo_ismapped() and "token" not in nuvem.ler_sessao(),
+       "sair volta pro login e esquece a sessao")
 app.acao_exemplo()
 app.update()
 
@@ -663,6 +760,7 @@ app.update()
 app.update_idletasks()
 os.system("import -window root %s/gui_b024.png 2>/dev/null" % PASTA)
 app.destroy()
+srv.shutdown()
 
 print()
 if FALHAS:

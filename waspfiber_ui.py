@@ -41,16 +41,22 @@ def icone(nome, cor="fraco", tamanho=18):
 
 
 def logo(tamanho=32):
-    """Marca do WaspFiber (favo com o W de fibra): 32, 48, 64 ou 96 px."""
+    """Marca do WaspFiber: a vespa (com contorno claro pra aparecer no tema
+    escuro), na altura pedida - 32, 48, 64 ou 96 px."""
     chave = ("__logo", tamanho)
     if chave not in _CACHE_ICONES:
-        if tamanho == 48 and hasattr(nix_icones, "LOGO_96"):
-            grande = tk.PhotoImage(data=nix_icones.LOGO_96, master=_MESTRE[0])
-            _CACHE_ICONES[chave] = grande.subsample(2)
-        else:
-            dados = (getattr(nix_icones, "LOGO_96", nix_icones.LOGO_64) if tamanho > 64
-                     else nix_icones.LOGO_64 if tamanho > 32 else nix_icones.LOGO_32)
-            _CACHE_ICONES[chave] = tk.PhotoImage(data=dados, master=_MESTRE[0])
+        dados = getattr(nix_icones, "LOGO_%d" % tamanho, None) or (
+            nix_icones.LOGO_64 if tamanho > 32 else nix_icones.LOGO_32)
+        _CACHE_ICONES[chave] = tk.PhotoImage(data=dados, master=_MESTRE[0])
+    return _CACHE_ICONES[chave]
+
+
+def logo_icone():
+    """A vespa num quadrado (icone da janela e da barra de tarefas)."""
+    chave = ("__logo_icone",)
+    if chave not in _CACHE_ICONES:
+        dados = getattr(nix_icones, "LOGO_ICONE_64", nix_icones.LOGO_64)
+        _CACHE_ICONES[chave] = tk.PhotoImage(data=dados, master=_MESTRE[0])
     return _CACHE_ICONES[chave]
 
 

@@ -28,10 +28,10 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import waspfiber_ui as nix_ui   # icones, botoes, menus e cartoes da interface
 import waspfiber_mapa as mapa   # localizacao do diagrama (B0.34)
-import waspfiber_cidades as cidades   # cidades (pastas) e diagramas (B0.36)
+import waspfiber_nuvem as nuvem   # servidor: login, cidades e diagramas (B0.39)
 
 APP_NOME = "WaspFiber"
-VERSAO = "B0.37"
+VERSAO = "B0.40"
 EXTENSAO = ".wasp.json"
 EXTENSAO_NIX = ".nix.json"      # redes salvas quando o programa se chamava Nix
 
@@ -2769,13 +2769,13 @@ def caminhos_autosave_antigos():
     return [os.path.join(p, "recuperacao.json") for p in pastas_antigas()]
 
 
-def gravar_autosave(rede, caminho_original=None):
+def gravar_autosave(rede, caminho_original=None, documento=None):
     """Grava uma copia de seguranca a cada alteracao. Falha em silencio: e
     protecao, nao pode atrapalhar o trabalho."""
     try:
         dados = rede.to_dict()
         dados["_autosave"] = {"quando": time.strftime("%d/%m/%Y %H:%M:%S"),
-                              "arquivo": caminho_original or ""}
+                              "arquivo": caminho_original or "", "documento": documento}
         with open(caminho_autosave(), "w", encoding="utf-8") as fp:
             json.dump(dados, fp, ensure_ascii=False)
         return True
@@ -4190,56 +4190,6 @@ class DialogPendencias(tk.Toplevel):
 ICONE_LOCAL = {"POP": "server", "CEO": "cable", "CTO": "split"}
 
 
-class DialogNovaCidade(DialogoBase):
-    """Cadastra uma cidade: cria a pasta 'Nome - UF' dentro da pasta do
-    provedor (a pasta compartilhada no servidor, por exemplo)."""
-
-    def __init__(self, parent, pasta_inicial):
-        self.pasta_inicial = pasta_inicial
-        self.resultado = None
-        super().__init__(parent, "Nova cidade")
-
-    def body(self, master):
-        ttk.Label(master, text="Nome da cidade:").grid(row=0, column=0, sticky="w", pady=3)
-        self.e_nome = ttk.Entry(master, width=34)
-        self.e_nome.grid(row=0, column=1, columnspan=2, sticky="we", pady=3)
-        ttk.Label(master, text="UF:").grid(row=1, column=0, sticky="w", pady=3)
-        self.var_uf = tk.StringVar(value="")
-        ttk.Combobox(master, textvariable=self.var_uf, width=6, state="readonly",
-                     values=("",) + cidades.UFS).grid(row=1, column=1, sticky="w", pady=3)
-        ttk.Label(master, text="Guardar em:").grid(row=2, column=0, sticky="w", pady=3)
-        self.var_pasta = tk.StringVar(value=self.pasta_inicial)
-        ttk.Entry(master, textvariable=self.var_pasta, width=34).grid(row=2, column=1,
-                                                                     sticky="we", pady=3)
-        ttk.Button(master, text="Escolher...", command=self._escolher).grid(
-            row=2, column=2, padx=(4, 0), pady=3)
-        ttk.Label(master, text="Cada cidade vira uma pasta com os diagramas dela "
-                               "(POP, caixas de emenda, CTOs). Use uma pasta compartilhada "
-                               "no servidor pra equipe toda ver as mesmas cidades.",
-                  style="Fraco.TLabel", wraplength=380, justify="left").grid(
-            row=3, column=0, columnspan=3, sticky="w", pady=(10, 0))
-        return self.e_nome
-
-    def _escolher(self):
-        pasta = filedialog.askdirectory(parent=self, title="Pasta onde ficam as cidades",
-                                        initialdir=self.var_pasta.get() or None)
-        if pasta:
-            self.var_pasta.set(os.path.normpath(pasta))
-
-    def validate(self):
-        if not self.e_nome.get().strip():
-            messagebox.showwarning("Nova cidade", "Informe o nome da cidade.", parent=self)
-            return False
-        if not self.var_pasta.get().strip():
-            messagebox.showwarning("Nova cidade", "Escolha onde guardar a cidade.", parent=self)
-            return False
-        return True
-
-    def apply(self):
-        self.resultado = (self.e_nome.get().strip(), self.var_uf.get().strip(),
-                          self.var_pasta.get().strip())
-
-
 class DialogNovoDiagrama(DialogoBase):
     """Novo diagrama numa cidade: de qual local ele e (POP, CEO, CTO) e o nome."""
 
@@ -4440,19 +4390,126 @@ def marca_wordmark(pai, tema, fonte_titulo, fonte, tamanho_logo=48, subtitulo=Tr
     return caixa
 
 
-class TelaInicio(tk.Frame):
-    """Primeira tela do programa: escolher a cidade (pasta) e o diagrama
-    (POP / CEO / CTO) - ou cadastrar uma cidade / um diagrama novo. Fica por
-    cima do editor e some quando um diagrama e aberto.
+class DialogNovaCidade(DialogoBase):
+    """Cadastra uma cidade no servidor da empresa."""
 
-    Visual (B0.37): moldura (cabecalho e coluna das cidades) no tom da
-    janela, area dos diagramas mais escura e os diagramas em cartoes."""
+    def __init__(self, parent):
+        self.resultado = None
+        super().__init__(parent, "Nova cidade")
+
+    def body(self, master):
+        ttk.Label(master, text="Nome da cidade:").grid(row=0, column=0, sticky="w", pady=3)
+        self.e_nome = ttk.Entry(master, width=34)
+        self.e_nome.grid(row=0, column=1, sticky="we", pady=3)
+        ttk.Label(master, text="UF:").grid(row=1, column=0, sticky="w", pady=3)
+        self.var_uf = tk.StringVar(value="")
+        ttk.Combobox(master, textvariable=self.var_uf, width=6, state="readonly",
+                     values=("",) + nuvem.UFS).grid(row=1, column=1, sticky="w", pady=3)
+        ttk.Label(master, text="A cidade fica no servidor da empresa: todo mundo da equipe "
+                               "ve a mesma lista e os mesmos diagramas.",
+                  style="Fraco.TLabel", wraplength=340, justify="left").grid(
+            row=2, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        return self.e_nome
+
+    def validate(self):
+        if not self.e_nome.get().strip():
+            messagebox.showwarning("Nova cidade", "Informe o nome da cidade.", parent=self)
+            return False
+        return True
+
+    def apply(self):
+        self.resultado = (self.e_nome.get().strip(), self.var_uf.get().strip())
+
+
+def montar_form_login(pai, tema, fonte, ao_entrar, sessao_anterior=None):
+    """Campos de login (servidor, empresa, usuario, senha). Devolve um dict
+    com os campos, o rotulo de erro e a funcao enviar()."""
+    s = sessao_anterior or {}
+    fundo = pai.cget("bg")
+    campos = {}
+    for chave, rotulo, valor, oculto in (
+            ("url", "Servidor", s.get("url") or nuvem.SERVIDOR_PADRAO, False),
+            ("empresa", "Empresa", s.get("empresa", ""), False),
+            ("usuario", "Usuario", s.get("usuario", ""), False),
+            ("senha", "Senha", "", True)):
+        tk.Label(pai, text=rotulo, bg=fundo, fg=tema["ui_texto_fraco"],
+                 font=(fonte, 8)).pack(anchor="w", pady=(8, 2))
+        entrada = ttk.Entry(pai, width=38, show="•" if oculto else "")
+        entrada.insert(0, valor)
+        entrada.pack(fill="x")
+        campos[chave] = entrada
+    erro = tk.Label(pai, text="", bg=fundo, fg=tema["ui_erro"], font=(fonte, 8),
+                    wraplength=300, justify="left")
+    erro.pack(anchor="w", pady=(8, 0))
+
+    def enviar(_evento=None):
+        dados = {k: e.get().strip() if k != "senha" else e.get() for k, e in campos.items()}
+        if not all(dados.values()):
+            erro.configure(text="Preencha servidor, empresa, usuario e senha.")
+            return "break"
+        erro.configure(text="Entrando...")
+        pai.update_idletasks()
+        try:
+            conexao = nuvem.Conexao.entrar(dados["url"], dados["empresa"], dados["usuario"],
+                                           dados["senha"])
+        except nuvem.ErroServidor as falha:
+            erro.configure(text=str(falha))
+            campos["senha"].delete(0, "end")
+            return "break"
+        campos["senha"].delete(0, "end")
+        erro.configure(text="")
+        ao_entrar(conexao)
+        return "break"
+    for entrada in campos.values():
+        entrada.bind("<Return>", enviar)
+    primeiro = next((campos[k] for k in ("empresa", "usuario", "senha") if not campos[k].get()),
+                    campos["senha"])
+    return {"campos": campos, "erro": erro, "enviar": enviar, "foco": primeiro}
+
+
+class DialogEntrar(DialogoBase):
+    """Login quando a sessao vence no meio do trabalho."""
+
+    def __init__(self, parent):
+        self.conexao = None
+        super().__init__(parent, "Entrar no servidor")
+
+    def body(self, master):
+        ttk.Label(master, text="A sessao com o servidor terminou. Entre de novo pra continuar "
+                               "(o diagrama aberto nao se perde).", wraplength=320,
+                  justify="left").pack(anchor="w")
+        self.form = montar_form_login(master, TEMA, "TkDefaultFont", self._entrou,
+                                      nuvem.ler_sessao())
+        return self.form["foco"]
+
+    def _entrou(self, conexao):
+        self.conexao = conexao
+        self.ok()
+
+    def ok(self, _evento=None):
+        if self.conexao is None:
+            self.form["enviar"]()
+            if self.conexao is None:
+                return
+        super().ok()
+
+    def validate(self):
+        return self.conexao is not None
+
+
+class TelaInicio(tk.Frame):
+    """Primeira tela do programa (B0.39: tudo no SERVIDOR). Sem sessao, mostra
+    o login; depois, as cidades da empresa e os diagramas (POP / CEO / CTO)
+    de cada uma - ou cadastrar uma cidade / um diagrama novo. Fica por cima
+    do editor e some quando um diagrama e aberto."""
 
     def __init__(self, app):
         t = TEMA
         super().__init__(app, bg=t["ui_fundo"])
         self.app = app
         self.cidade = None
+        self.cidades = []
+        self.itens = []
         self.linhas_cidade = {}
         self.linhas_diagrama = {}
         self.diagrama_escolhido = None
@@ -4466,15 +4523,13 @@ class TelaInicio(tk.Frame):
         marca_wordmark(topo, t, titulo, fonte).pack(side="left")
         BotaoIcone(topo, t, "circle-help", texto="Como usar",
                    comando=app.acao_ajuda).pack(side="right")
-        BotaoIcone(topo, t, "list-tree", texto="Rede de exemplo",
-                   comando=app.acao_exemplo).pack(side="right", padx=(0, 4))
         tk.Frame(self, bg=t["ui_borda"], height=1).pack(fill="x")
 
-        corpo = tk.Frame(self, bg=t["ui_fundo"])
-        corpo.pack(fill="both", expand=True)
+        self.corpo = tk.Frame(self, bg=t["ui_fundo"])
+        self.corpo.pack(fill="both", expand=True)
 
         # ----- coluna das cidades -----
-        esquerda = tk.Frame(corpo, bg=t["ui_fundo"], width=340)
+        esquerda = tk.Frame(self.corpo, bg=t["ui_fundo"], width=340)
         esquerda.pack(side="left", fill="y")
         esquerda.pack_propagate(False)
         cab = tk.Frame(esquerda, bg=t["ui_fundo"])
@@ -4484,33 +4539,45 @@ class TelaInicio(tk.Frame):
         self.lbl_qtd_cidades = tk.Label(cab, text="", bg=t["ui_fundo"], fg=t["ui_texto_fraco"],
                                         font=(fonte, 9))
         self.lbl_qtd_cidades.pack(side="left", padx=(8, 0), pady=(2, 0))
+        BotaoIcone(cab, t, "rotate-cw", dica="Atualizar (buscar de novo no servidor)",
+                   comando=self.atualizar).pack(side="right")
         botoes = tk.Frame(esquerda, bg=t["ui_fundo"])
         botoes.pack(fill="x", padx=(22, 16), pady=(0, 12))
         BotaoIcone(botoes, t, "plus", texto="Nova cidade", variante="acento",
                    comando=self.nova_cidade).pack(side="left")
-        BotaoIcone(botoes, t, "folder-open", texto="Abrir pasta", variante="normal",
-                   comando=self.abrir_pasta_cidade).pack(side="left", padx=(6, 0))
         self.lista_cidades = ListaRolavel(esquerda, t)
         self.lista_cidades.pack(fill="both", expand=True, padx=(14, 8))
 
+        # quadro do servidor: onde esta conectado, quem e, envios pendentes
         rodape = tk.Frame(esquerda, bg=t["ui_painel"])
         rodape.pack(fill="x", padx=16, pady=16)
         dentro = tk.Frame(rodape, bg=t["ui_painel"])
         dentro.pack(fill="x", padx=12, pady=10)
-        tk.Label(dentro, text="PASTA DAS CIDADES", bg=t["ui_painel"], fg=t["ui_texto_fraco"],
-                 font=(fonte, 7, "bold")).pack(anchor="w")
         linha = tk.Frame(dentro, bg=t["ui_painel"])
-        linha.pack(fill="x", pady=(3, 0))
-        self.lbl_pasta = tk.Label(linha, text="", bg=t["ui_painel"], fg=t["ui_texto"],
-                                  font=(fonte, 8), anchor="w", justify="left", wraplength=230)
-        self.lbl_pasta.pack(side="left", fill="x", expand=True)
-        BotaoIcone(linha, t, "folder-search", dica="Trocar a pasta das cidades",
-                   comando=self.trocar_pasta).pack(side="right")
+        linha.pack(fill="x")
+        self.lbl_servidor_titulo = tk.Label(linha, text="SERVIDOR", bg=t["ui_painel"],
+                                            fg=t["ui_texto_fraco"], font=(fonte, 7, "bold"))
+        self.lbl_servidor_titulo.pack(side="left")
+        self.bt_sair = BotaoIcone(linha, t, "x", texto="Sair", comando=self.sair)
+        self.bt_sair.pack(side="right")
+        self.lbl_empresa = tk.Label(dentro, text="", bg=t["ui_painel"], fg=t["ui_texto"],
+                                    font=(titulo, 9), anchor="w", justify="left")
+        self.lbl_empresa.pack(anchor="w", pady=(2, 0))
+        self.lbl_servidor = tk.Label(dentro, text="", bg=t["ui_painel"], fg=t["ui_texto_fraco"],
+                                     font=(fonte, 8), anchor="w", justify="left", wraplength=280)
+        self.lbl_servidor.pack(anchor="w")
+        self.quadro_pendentes = tk.Frame(dentro, bg=t["ui_painel"])
+        self.lbl_pendentes = tk.Label(self.quadro_pendentes, text="", bg=t["ui_painel"],
+                                      fg=t["ui_aviso"], font=(fonte, 8), anchor="w",
+                                      justify="left", wraplength=200)
+        self.lbl_pendentes.pack(side="left")
+        BotaoIcone(self.quadro_pendentes, t, "rotate-cw", texto="Enviar",
+                   comando=lambda: self.app._sincronizar(avisar=True)).pack(side="right")
 
-        tk.Frame(corpo, bg=t["ui_borda"], width=1).pack(side="left", fill="y")
+        tk.Frame(self.corpo, bg=t["ui_borda"], width=1).pack(side="left", fill="y")
 
         # ----- area dos diagramas (mais escura) -----
-        self.direita = tk.Frame(corpo, bg=profundo)
+        self.direita = tk.Frame(self.corpo, bg=profundo)
         self.direita.pack(side="left", fill="both", expand=True)
         self.cab_cidade = tk.Frame(self.direita, bg=profundo)
         self.cab_cidade.pack(fill="x", padx=32, pady=(24, 4))
@@ -4519,47 +4586,56 @@ class TelaInicio(tk.Frame):
         self.lbl_cidade.pack(anchor="w")
         self.resumo = tk.Frame(self.cab_cidade, bg=profundo)
         self.resumo.pack(anchor="w", pady=(6, 0))
-        self.lbl_cidade_info = tk.Label(self.cab_cidade, text="", bg=profundo,
-                                        fg=t["ui_texto_fraco"], font=(fonte, 8), anchor="w")
-        self.lbl_cidade_info.pack(anchor="w", pady=(8, 0))
         self.barra_diagramas = tk.Frame(self.direita, bg=profundo)
-        self.barra_diagramas.pack(fill="x", padx=30, pady=(14, 10))
+        self.barra_diagramas.pack(fill="x", padx=30, pady=(16, 10))
         BotaoIcone(self.barra_diagramas, t, "plus", texto="Novo diagrama", variante="acento",
                    comando=self.novo_diagrama).pack(side="left")
         self.bt_abrir = BotaoIcone(self.barra_diagramas, t, "folder-open", texto="Abrir",
                                    variante="normal", comando=self.abrir_escolhido)
         self.bt_abrir.pack(side="left", padx=(6, 0))
-        BotaoIcone(self.barra_diagramas, t, "folder-search", texto="Mostrar a pasta",
-                   comando=self.mostrar_pasta).pack(side="left", padx=(6, 0))
-        BotaoIcone(self.barra_diagramas, t, "x", texto="Tirar da lista",
-                   dica="Tira esta cidade da lista (nao apaga nada)",
-                   comando=self.esquecer).pack(side="right")
+        BotaoIcone(self.barra_diagramas, t, "download", texto="Importar arquivo",
+                   dica="Envia um .wasp.json deste computador pra esta cidade no servidor",
+                   comando=self.importar).pack(side="left", padx=(6, 0))
         self.lista_diagramas = ListaRolavel(self.direita, t, fundo=profundo)
         self.lista_diagramas.pack(fill="both", expand=True, padx=(30, 18), pady=(0, 18))
 
-        # convite quando nao ha nenhuma cidade
-        self.vazio = tk.Frame(self.direita, bg=profundo)
-        tk.Label(self.vazio, image=nix_ui.logo_emblema(), bg=profundo).pack(pady=(0, 18))
-        tk.Label(self.vazio, text="Comece cadastrando uma cidade", bg=profundo,
-                 fg=t["ui_texto"], font=(titulo, 15)).pack()
-        tk.Label(self.vazio, text="Cada cidade e uma pasta com os diagramas dos POPs, caixas "
-                                  "de emenda e CTOs dela.\nUse uma pasta compartilhada no "
-                                  "servidor pra equipe toda trabalhar nas mesmas cidades.",
-                 bg=profundo, fg=t["ui_texto_fraco"], font=(fonte, 9),
-                 justify="center").pack(pady=(8, 18))
-        caixa = tk.Frame(self.vazio, bg=profundo)
-        caixa.pack()
-        BotaoIcone(caixa, t, "plus", texto="Nova cidade", variante="acento",
-                   comando=self.nova_cidade).pack(side="left")
-        BotaoIcone(caixa, t, "folder-open", texto="Abrir pasta de cidade", variante="normal",
-                   comando=self.abrir_pasta_cidade).pack(side="left", padx=6)
+        # mensagem no lugar da lista (sem cidades / sem conexao)
+        self.aviso = tk.Frame(self.direita, bg=profundo)
+        self.aviso_img = tk.Label(self.aviso, image=nix_ui.logo_emblema(), bg=profundo)
+        self.aviso_img.pack(pady=(0, 18))
+        self.aviso_titulo = tk.Label(self.aviso, text="", bg=profundo, fg=t["ui_texto"],
+                                     font=(titulo, 15))
+        self.aviso_titulo.pack()
+        self.aviso_texto = tk.Label(self.aviso, text="", bg=profundo, fg=t["ui_texto_fraco"],
+                                    font=(fonte, 9), justify="center")
+        self.aviso_texto.pack(pady=(8, 18))
+        self.aviso_botoes = tk.Frame(self.aviso, bg=profundo)
+        self.aviso_botoes.pack()
+
+        # ----- login (cobre tudo abaixo do cabecalho) -----
+        self.login = tk.Frame(self, bg=profundo)
+        cartao = tk.Frame(self.login, bg=t["ui_painel"], highlightthickness=1,
+                          highlightbackground=t["ui_borda"])
+        cartao.place(relx=0.5, rely=0.46, anchor="center")
+        caixa = tk.Frame(cartao, bg=t["ui_painel"])
+        caixa.pack(padx=34, pady=28)
+        tk.Label(caixa, image=nix_ui.logo(64), bg=t["ui_painel"]).pack(pady=(0, 10))
+        tk.Label(caixa, text="Entrar no servidor", bg=t["ui_painel"], fg=t["ui_texto"],
+                 font=(titulo, 14)).pack()
+        tk.Label(caixa, text="As cidades e os diagramas ficam no servidor da empresa.",
+                 bg=t["ui_painel"], fg=t["ui_texto_fraco"], font=(fonte, 9)).pack(pady=(2, 6))
+        self.form = montar_form_login(caixa, t, fonte, self._entrou, nuvem.ler_sessao())
+        BotaoIcone(caixa, t, None, texto="Entrar", variante="acento",
+                   comando=self.form["enviar"]).pack(fill="x", pady=(12, 0))
 
         self.bind_all("<Return>", self._enter, add="+")
 
-    # ---------------- dados ----------------
+    # ---------------- estado ----------------
+    @property
+    def conexao(self):
+        return self.app.conexao
+
     def mostrar(self):
-        """Recarrega cidades e diagramas (outra pessoa pode ter mexido na
-        pasta compartilhada) e mostra a tela."""
         self.place(x=0, y=0, relwidth=1, relheight=1)
         self.lift()
         self.atualizar()
@@ -4567,64 +4643,136 @@ class TelaInicio(tk.Frame):
     def visivel(self):
         return bool(self.place_info())
 
+    def _mostrar_login(self, mensagem=""):
+        self.corpo.pack_forget()
+        self.login.pack(fill="both", expand=True)
+        self.form["erro"].configure(text=mensagem)
+        self.after(50, lambda: self.form["foco"].focus_set())
+
+    def _entrou(self, conexao):
+        self.app.conexao = conexao
+        self.app.after(300, self.app._sincronizar)
+        self.atualizar()
+
+    def sair(self):
+        if self.conexao and nuvem.pendentes():
+            if not messagebox.askyesno(
+                    "Sair", "Ainda ha diagrama(s) aguardando envio pro servidor. Eles continuam "
+                            "guardados neste computador e sao enviados no proximo login.\n\n"
+                            "Sair mesmo assim?"):
+                return
+        if self.conexao:
+            self.conexao.sair()
+        self.app.conexao = None
+        self.cidade = None
+        self.atualizar()
+
+    def _chamar(self, funcao, titulo="Servidor"):
+        """Chama o servidor; trata sessao vencida e falta de conexao.
+        Devolve (ok, resultado)."""
+        self.configure(cursor="watch")
+        self.update_idletasks()
+        try:
+            return True, funcao()
+        except nuvem.ErroServidor as erro:
+            if erro.status == 401:
+                self.app.conexao = None
+                self._mostrar_login(str(erro))
+            elif erro.sem_conexao:
+                self._mostrar_aviso("Sem conexao com o servidor", str(erro) +
+                                    "\nConfira a rede (ou a VPN) e tente de novo.",
+                                    [("rotate-cw", "Tentar de novo", self.atualizar)])
+            else:
+                messagebox.showwarning(titulo, str(erro))
+            return False, None
+        finally:
+            self.configure(cursor="")
+
+    # ---------------- dados ----------------
     def atualizar(self):
-        pasta = cidades.pasta_provedor()
-        self.lbl_pasta.configure(text=pasta or "Ainda nao escolhida - crie ou abra uma cidade.")
-        lista = cidades.cidades_conhecidas()
+        if not self.conexao:
+            self._mostrar_login()
+            return
+        self.login.pack_forget()
+        if not self.corpo.winfo_ismapped():
+            self.corpo.pack(fill="both", expand=True)
+        info = self.conexao.info
+        self.lbl_empresa.configure(text="%s  ·  %s" % (info.get("empresa_nome") or info.get("empresa", ""),
+                                                       info.get("nome") or info.get("usuario", "")))
+        self.lbl_servidor.configure(text=self.conexao.url)
+        self.atualizar_pendentes()
+        ok, lista = self._chamar(self.conexao.cidades)
+        if not ok:
+            return
+        self.cidades = lista
         self.lbl_qtd_cidades.configure(text=str(len(lista)) if lista else "")
         self.lista_cidades.limpar()
         self.linhas_cidade = {}
         for cidade in lista:
-            qtd = len(cidades.listar_diagramas(cidade["pasta"]))
-            detalhe = "%d diagrama%s" % (qtd, "" if qtd == 1 else "s")
-            if cidade.get("fora_da_pasta"):
-                detalhe += "  ·  fora da pasta das cidades"
+            qtd = cidade.get("diagramas", 0)
             linha = LinhaLista(self.lista_cidades.corpo, TEMA, "building-2", cidade["titulo"],
-                               detalhe, ao_clicar=lambda c=cidade: self.escolher_cidade(c),
+                               "%d diagrama%s" % (qtd, "" if qtd == 1 else "s"),
+                               ao_clicar=lambda c=cidade: self.escolher_cidade(c),
                                ao_duplo=lambda c=cidade: self.escolher_cidade(c),
                                fonte=self.app.fonte_ui)
             linha.pack(fill="x", pady=1)
-            self.linhas_cidade[os.path.normcase(cidade["pasta"])] = linha
+            self.linhas_cidade[cidade["id"]] = linha
         self.lista_cidades.ligar_roda()
-        escolhida = None
-        if self.cidade and cidades.ler_cidade(self.cidade["pasta"]):
-            escolhida = self.cidade["pasta"]
-        elif cidades.ultima_cidade():
-            escolhida = cidades.ultima_cidade()
-        elif lista:
-            escolhida = lista[0]["pasta"]
-        cidade = cidades.ler_cidade(escolhida) if escolhida else None
-        if cidade:
-            self.escolher_cidade(cidade, registrar=False)
-        else:
+        if not lista:
             self.cidade = None
-            self._mostrar_vazio(True)
+            self._mostrar_aviso("Comece cadastrando uma cidade",
+                                "Cada cidade guarda os diagramas dos POPs, caixas de emenda "
+                                "e CTOs dela.\nTudo fica no servidor: a equipe toda ve as "
+                                "mesmas cidades.",
+                                [("plus", "Nova cidade", self.nova_cidade)])
+            return
+        ultima = nuvem.ler_sessao().get("ultima_cidade")
+        escolhida = next((c for c in lista if self.cidade and c["id"] == self.cidade["id"]), None) \
+            or next((c for c in lista if c["id"] == ultima), None) or lista[0]
+        self.escolher_cidade(escolhida, registrar=False)
 
-    def _mostrar_vazio(self, sim):
-        if sim:
-            for parte in (self.cab_cidade, self.barra_diagramas, self.lista_diagramas):
-                parte.pack_forget()
-            self.vazio.place(relx=0.5, rely=0.45, anchor="center")
+    def atualizar_pendentes(self):
+        qtd = len(nuvem.pendentes())
+        if qtd:
+            self.lbl_pendentes.configure(text="%d diagrama%s aguardando envio" % (
+                qtd, "" if qtd == 1 else "s"))
+            self.quadro_pendentes.pack(fill="x", pady=(8, 0))
         else:
-            self.vazio.place_forget()
-            if not self.cab_cidade.winfo_ismapped():
-                self.cab_cidade.pack(fill="x", padx=32, pady=(24, 4))
-                self.barra_diagramas.pack(fill="x", padx=30, pady=(14, 10))
-                self.lista_diagramas.pack(fill="both", expand=True, padx=(30, 18), pady=(0, 18))
+            self.quadro_pendentes.pack_forget()
+
+    def _mostrar_aviso(self, titulo, texto, botoes):
+        for parte in (self.cab_cidade, self.barra_diagramas, self.lista_diagramas):
+            parte.pack_forget()
+        self.aviso_titulo.configure(text=titulo)
+        self.aviso_texto.configure(text=texto)
+        for filho in self.aviso_botoes.winfo_children():
+            filho.destroy()
+        for i, (icone, texto_bt, comando) in enumerate(botoes):
+            nix_ui.BotaoIcone(self.aviso_botoes, TEMA, icone, texto=texto_bt,
+                              variante="acento" if i == 0 else "normal",
+                              comando=comando).pack(side="left", padx=3)
+        self.aviso.place(relx=0.5, rely=0.45, anchor="center")
+
+    def _esconder_aviso(self):
+        self.aviso.place_forget()
+        if not self.cab_cidade.winfo_ismapped():
+            self.cab_cidade.pack(fill="x", padx=32, pady=(24, 4))
+            self.barra_diagramas.pack(fill="x", padx=30, pady=(16, 10))
+            self.lista_diagramas.pack(fill="both", expand=True, padx=(30, 18), pady=(0, 18))
 
     def escolher_cidade(self, cidade, registrar=True):
         self.cidade = cidade
         if registrar:
-            cidades.registrar_recente(cidade["pasta"])
+            s = nuvem.ler_sessao()
+            s["ultima_cidade"] = cidade["id"]
+            nuvem.gravar_sessao(s)
         for chave, linha in self.linhas_cidade.items():
-            linha.marcar(chave == os.path.normcase(cidade["pasta"]))
-        self._mostrar_vazio(False)
+            linha.marcar(chave == cidade["id"])
+        self._esconder_aviso()
         self.lbl_cidade.configure(text=cidade["titulo"])
-        self.lbl_cidade_info.configure(text=cidade["pasta"])
         self.listar_diagramas()
 
     def _montar_resumo(self, itens):
-        """'1 POP  2 CEO  5 CTO  ·  2 sem localizacao' com os selos coloridos."""
         t = TEMA
         profundo = t["ui_profundo"]
         for filho in self.resumo.winfo_children():
@@ -4652,11 +4800,13 @@ class TelaInicio(tk.Frame):
 
     def listar_diagramas(self):
         t = TEMA
-        profundo = t["ui_profundo"]
         self.lista_diagramas.limpar()
         self.linhas_diagrama = {}
         self.diagrama_escolhido = None
-        itens = cidades.listar_diagramas(self.cidade["pasta"])
+        ok, itens = self._chamar(lambda: self.conexao.diagramas(self.cidade["id"]))
+        if not ok:
+            return
+        self.itens = itens
         self._montar_resumo(itens)
         if not itens:
             caixa = tk.Frame(self.lista_diagramas.corpo, bg=t["ui_painel"],
@@ -4681,114 +4831,62 @@ class TelaInicio(tk.Frame):
                     item["fusoes"]))
                 if not item["tem_coordenada"]:
                     partes.append("sem localizacao no mapa")
+            if nuvem.pendente_de(self.cidade["id"], item["id"]):
+                partes.append("alteracoes deste PC aguardando envio")
+            direita = "alterado em %s" % _quando(item["modificado"])
+            if item.get("alterado_por"):
+                direita += "\npor %s" % item["alterado_por"]
             selo = (item["tipo"], COR_LOCAL[item["tipo"]]) if item["tipo"] in COR_LOCAL else None
             linha = LinhaLista(self.lista_diagramas.corpo, t,
                                ICONE_LOCAL.get(item["tipo"], "file-text"), item["titulo"],
-                               "   ·   ".join(partes), "alterado em\n" + _quando(item["modificado"]),
+                               "   ·   ".join(partes), direita,
                                ao_clicar=lambda i=item: self._escolher_diagrama(i),
-                               ao_duplo=lambda i=item: self.app.abrir_diagrama(i["caminho"]),
+                               ao_duplo=lambda i=item: self.app.abrir_diagrama(self.cidade, i["id"]),
                                fonte=self.app.fonte_ui, fonte_titulo=self.app.fonte_titulo,
                                estilo="cartao", selo=selo)
             linha.pack(fill="x", pady=4)
-            self.linhas_diagrama[item["caminho"]] = linha
+            self.linhas_diagrama[item["id"]] = linha
         self.lista_diagramas.ligar_roda()
 
     def _escolher_diagrama(self, item):
-        self.diagrama_escolhido = item["caminho"]
-        for caminho, linha in self.linhas_diagrama.items():
-            linha.marcar(caminho == item["caminho"])
+        self.diagrama_escolhido = item["id"]
+        for did, linha in self.linhas_diagrama.items():
+            linha.marcar(did == item["id"])
 
     def _enter(self, evento):
-        if self.visivel() and evento.widget.winfo_toplevel() is self.app \
+        if self.visivel() and self.conexao and evento.widget.winfo_toplevel() is self.app \
                 and self.diagrama_escolhido:
             self.abrir_escolhido()
 
     # ---------------- acoes ----------------
     def abrir_escolhido(self):
-        if self.diagrama_escolhido:
-            self.app.abrir_diagrama(self.diagrama_escolhido)
+        if self.diagrama_escolhido and self.cidade:
+            self.app.abrir_diagrama(self.cidade, self.diagrama_escolhido)
         elif self.cidade:
             self.app.status.config(text="Escolha um diagrama da lista (ou crie um novo).")
 
     def nova_cidade(self):
-        pasta = cidades.pasta_provedor() or cidades.pasta_provedor_sugerida()
-        dialogo = DialogNovaCidade(self.app, pasta)
+        if not self.conexao:
+            return
+        dialogo = DialogNovaCidade(self.app)
         if not dialogo.resultado:
             return
-        nome, uf, pasta = dialogo.resultado
-        try:
-            os.makedirs(pasta, exist_ok=True)
-            cidade = cidades.criar_cidade(pasta, nome, uf)
-        except (ValueError, OSError) as erro:
-            messagebox.showwarning("Nova cidade", str(erro))
-            return
-        if not cidades.pasta_provedor() or not os.path.samefile(cidades.pasta_provedor(), pasta):
-            cidades.definir_pasta_provedor(pasta)
-        cidades.registrar_recente(cidade["pasta"])
-        self.cidade = cidade
-        self.atualizar()
-
-    def abrir_pasta_cidade(self):
-        pasta = filedialog.askdirectory(parent=self.app, title="Abrir a pasta de uma cidade",
-                                        initialdir=cidades.pasta_provedor() or None)
-        if not pasta:
-            return
-        pasta = os.path.normpath(pasta)
-        if not cidades.eh_cidade(pasta):
-            dentro = cidades.listar_cidades(pasta)
-            if dentro:
-                # escolheu a pasta do provedor (que tem as cidades dentro)
-                cidades.definir_pasta_provedor(pasta)
-                self.cidade = dentro[0]
-                self.atualizar()
-                return
-            if not messagebox.askyesno(
-                    "Abrir pasta de cidade",
-                    "Esta pasta ainda nao e uma cidade do %s:\n%s\n\nUsar esta pasta como "
-                    "cidade? (os diagramas .wasp.json que estiverem nela aparecem na lista)"
-                    % (APP_NOME, pasta)):
-                return
-        try:
-            cidade = cidades.abrir_pasta_como_cidade(pasta)
-        except (ValueError, OSError) as erro:
-            messagebox.showwarning("Abrir pasta de cidade", str(erro))
-            return
-        if not cidades.pasta_provedor():
-            cidades.definir_pasta_provedor(os.path.dirname(cidade["pasta"]))
-        cidades.registrar_recente(cidade["pasta"])
-        self.cidade = cidade
-        self.atualizar()
-
-    def trocar_pasta(self):
-        pasta = filedialog.askdirectory(parent=self.app, title="Pasta onde ficam as cidades",
-                                        initialdir=cidades.pasta_provedor() or None)
-        if pasta:
-            cidades.definir_pasta_provedor(os.path.normpath(pasta))
-            self.cidade = None
+        nome, uf = dialogo.resultado
+        ok, cidade = self._chamar(lambda: self.conexao.criar_cidade(nome, uf), "Nova cidade")
+        if ok:
+            self.cidade = cidade
+            s = nuvem.ler_sessao()
+            s["ultima_cidade"] = cidade["id"]
+            nuvem.gravar_sessao(s)
             self.atualizar()
 
     def novo_diagrama(self):
         if self.cidade:
             self.app.novo_diagrama(self.cidade)
 
-    def mostrar_pasta(self):
-        if self.cidade and sys.platform.startswith("win"):
-            os.startfile(self.cidade["pasta"])
-
-    def esquecer(self):
-        if not self.cidade:
-            return
-        cidades.esquecer_cidade(self.cidade["pasta"])
-        dentro = cidades.pasta_provedor() and os.path.normcase(os.path.dirname(
-            self.cidade["pasta"])) == os.path.normcase(cidades.pasta_provedor())
-        if dentro:
-            messagebox.showinfo("Cidade", "Esta cidade esta dentro da pasta das cidades, entao "
-                                          "ela continua na lista. Nada foi apagado.")
-        if cidades.ultima_cidade() and os.path.normcase(cidades.ultima_cidade()) == \
-                os.path.normcase(self.cidade["pasta"]):
-            cidades.gravar_prefs({"ultima_cidade": ""})
-        self.cidade = None
-        self.atualizar()
+    def importar(self):
+        if self.cidade:
+            self.app.importar_diagrama(self.cidade)
 
 
 class App(tk.Tk):
@@ -4805,7 +4903,11 @@ class App(tk.Tk):
 
         self.rede = Rede()
         self.caminho_atual = None
-        self.cidade_atual = None       # cidade (pasta) do diagrama aberto - B0.36
+        # B0.39: os diagramas ficam no servidor. documento = o diagrama aberto
+        # (cidade, id e versao no servidor); conexao = login lembrado
+        self.documento = None
+        self.conexao = nuvem.Conexao.da_sessao_salva()
+        self._sincronizando = False
         self.porta_selecionada = None
         self.escala = 1.0
         self.cena = None
@@ -4831,6 +4933,7 @@ class App(tk.Tk):
         # B0.36: o programa abre na tela das cidades, nao direto no diagrama
         self.tela_inicio = TelaInicio(self)
         self.tela_inicio.mostrar()
+        self.after(1500, self._sincronizar_periodico)   # envia o que ficou sem conexao
         self.after(400, self._oferecer_recuperacao)
 
     # ---------------- protecao do trabalho ----------------
@@ -4846,7 +4949,7 @@ class App(tk.Tk):
 
     def _marcar_alterado(self):
         self.alteracoes_pendentes = True
-        gravar_autosave(self.rede, self.caminho_atual)
+        gravar_autosave(self.rede, self.caminho_atual, getattr(self, "documento", None))
         if hasattr(self, "lbl_alterado"):
             self._atualizar_cabecalho()
 
@@ -4927,8 +5030,8 @@ class App(tk.Tk):
                 "(%d equipamentos, %d fusoes), de %s.%s\n\nQuer recuperar?"
                 % (len(rede.equipamentos), len(rede.fusoes), quando, detalhe)):
             self.rede = rede
-            self.caminho_atual = arquivo or None
-            self.cidade_atual = cidades.cidade_do_arquivo(self.caminho_atual)
+            self.caminho_atual = None
+            self.documento = (info or {}).get("documento")
             self.alteracoes_pendentes = True
             self.mostrar_editor()
             self.atualizar_tudo(centralizar=True)
@@ -4959,7 +5062,7 @@ class App(tk.Tk):
         Tudo fica no menu '...' do canto e na paleta de comandos (Ctrl+K)."""
         self.config(menu="")
         try:
-            self.iconphoto(True, nix_ui.logo(64))      # icone desta e das outras janelas
+            self.iconphoto(True, nix_ui.logo_icone())      # icone desta e das outras janelas
         except tk.TclError:
             pass
         # barra de titulo escura nas janelas de dialogo tambem
@@ -5023,11 +5126,11 @@ class App(tk.Tk):
             ("zoom-out", "Afastar", "", lambda: self.aplicar_zoom(1 / 1.2), "zoom menos"),
             ("undo-2", "Desfazer", "Ctrl+Z", self.acao_desfazer, "voltar"),
             ("redo-2", "Refazer", "Ctrl+Y", self.acao_refazer, ""),
-            ("file-plus", "Nova rede", "", self.acao_nova, "arquivo novo vazio"),
-            ("folder-open", "Abrir rede", "Ctrl+O", self.acao_abrir, "arquivo carregar json"),
+            ("file-plus", "Novo diagrama", "", self.acao_nova, "novo criar pop cto ceo caixa"),
+            ("download", "Importar diagrama de arquivo", "Ctrl+O", self.acao_abrir,
+             "abrir arquivo carregar json importar enviar servidor"),
             ("save", "Salvar", "Ctrl+S", self.acao_salvar, "gravar arquivo"),
-            ("save", "Salvar como", "", self.acao_salvar_como, "gravar arquivo copia"),
-            ("list-tree", "Carregar rede de exemplo", "", self.acao_exemplo, "demo teste"),
+            ("save", "Salvar como copia", "", self.acao_salvar_como, "gravar copia duplicar servidor"),
             ("download", "Exportar diagrama", "", self.acao_exportar,
              "pdf svg ps imagem imprimir"),
             ("file-text", "Relatorio PDF completo", "", self.acao_relatorio,
@@ -5041,20 +5144,20 @@ class App(tk.Tk):
 
     # comandos mostrados quando a paleta abre sem nada digitado
     PALETA_INICIAL = ("Novo equipamento", "Rastrear caminho da fibra",
-                      "Pendencias e capacidade", "Salvar", "Abrir rede",
+                      "Pendencias e capacidade", "Salvar", "Inicio (cidades e diagramas)",
                       "Exportar diagrama", "Relatorio PDF completo", "Organizar layout")
 
     def _itens_menu(self):
         c = {nome: (ic, nome, atalho, fn) for ic, nome, atalho, fn, _ in self._comandos()}
         grupo = lambda *nomes: [c[n] for n in nomes]
         return (grupo("Inicio (cidades e diagramas)") + [None]
-                + grupo("Nova rede", "Abrir rede", "Salvar", "Salvar como") + [None]
+                + grupo("Novo diagrama", "Salvar", "Salvar como copia",
+                        "Importar diagrama de arquivo") + [None]
                 + grupo("Exportar diagrama", "Relatorio PDF completo",
                         "Planilha para o Excel (CSV)") + [None]
                 + grupo("Localizacao do diagrama (mapa)", "Abrir no Google Maps",
                         "Abrir no Google Earth") + [None]
-                + grupo("Criar varios equipamentos", "Pendencias e capacidade",
-                        "Carregar rede de exemplo") + [None]
+                + grupo("Criar varios equipamentos", "Pendencias e capacidade") + [None]
                 + grupo("Como usar", "Autoteste", "Sair do WaspFiber"))
 
     # ---------------- aparencia ----------------
@@ -5337,8 +5440,6 @@ class App(tk.Tk):
                  fg=t["ui_texto_fraco"], font=(self.fonte_ui, 9)).pack(anchor="w", pady=(18, 10))
         BotaoIcone(self.vazio, t, "plus", texto="Novo equipamento", variante="acento",
                    comando=self.acao_novo_equipamento).pack(anchor="w", pady=2)
-        BotaoIcone(self.vazio, t, "layers", texto="Ver a rede de exemplo", variante="normal",
-                   comando=self.acao_exemplo).pack(anchor="w", pady=2)
 
         tk.Frame(self, bg=t["ui_borda"], width=1).pack(side="left", fill="y")
 
@@ -5661,8 +5762,8 @@ class App(tk.Tk):
             self._ajustar_zoom_para_caber()
         self._atualizar_listas()
         titulo = APP_NOME
-        if self.caminho_atual:
-            titulo += " - " + os.path.basename(self.caminho_atual)
+        if self._nome_documento():
+            titulo += " - " + self._nome_documento()
         if self.alteracoes_pendentes:
             titulo += "  *(nao salvo)"
         self.title(titulo)
@@ -5894,17 +5995,28 @@ class App(tk.Tk):
                               usadas, total_portas))
         self._atualizar_cabecalho()
 
+    def _nome_documento(self):
+        doc = getattr(self, "documento", None)
+        if doc or self.rede.local.get("nome"):
+            return self.rede.local.get("nome") or doc["id"]
+        if self.caminho_atual:
+            return os.path.basename(self.caminho_atual).split(".")[0]
+        return ""
+
     def _atualizar_cabecalho(self):
-        arquivo = os.path.basename(self.caminho_atual) if self.caminho_atual else "Rede sem nome"
-        for sufixo in (EXTENSAO, ".json"):
-            if arquivo.lower().endswith(sufixo):
-                arquivo = arquivo[:-len(sufixo)]
-                break
-        cidade = getattr(self, "cidade_atual", None)
+        arquivo = self._nome_documento() or "Diagrama sem nome"
+        doc = getattr(self, "documento", None)
+        cidade = (doc or {}).get("cidade")
         self.lbl_arquivo.configure(text=("%s   ›   %s" % (cidade["titulo"], arquivo))
                                    if cidade else arquivo)
-        self.title("%s - %s" % (APP_NOME, arquivo) if self.caminho_atual else APP_NOME)
-        self.lbl_alterado.configure(text="•" if self.alteracoes_pendentes else "")
+        self.title("%s - %s" % (APP_NOME, arquivo) if doc else APP_NOME)
+        aguardando = bool(doc and nuvem.pendente_de(cidade["id"], doc["id"]))
+        if self.alteracoes_pendentes:
+            self.lbl_alterado.configure(text="•", fg=TEMA["ui_acento"])
+        elif aguardando:
+            self.lbl_alterado.configure(text="aguardando envio ao servidor", fg=TEMA["ui_aviso"])
+        else:
+            self.lbl_alterado.configure(text="")
         if hasattr(self, "botao_local"):
             local = self.rede.local
             if mapa.local_preenchido(local):
@@ -5990,11 +6102,20 @@ class App(tk.Tk):
             return ("modulo", partes[1], partes[2], None)
         return ("porta", partes[1], partes[2] or None, int(partes[3]))
 
-    # ---------------- arquivo ----------------
-    # ---------------- inicio / cidades (B0.36) ----------------
+    # ---------------- inicio / servidor (B0.39) ----------------
     def mostrar_editor(self):
         if getattr(self, "tela_inicio", None) is not None:
             self.tela_inicio.place_forget()
+
+    def _limpar_editor(self):
+        self.rede = Rede()
+        self.caminho_atual = None
+        self.documento = None
+        self.porta_selecionada = None
+        self.destaque = set()
+        self._historico.clear()
+        self._refazer.clear()
+        self.alteracoes_pendentes = False
 
     def mostrar_inicio(self):
         """Volta pra tela das cidades (pergunta antes se ha algo nao salvo)."""
@@ -6003,128 +6124,271 @@ class App(tk.Tk):
         if not self._confirmar_descarte("Voltar ao inicio"):
             return
         self.fechar_paleta()
-        self.rede = Rede()
-        self.caminho_atual = None
-        self.porta_selecionada = None
-        self.destaque = set()
-        self._historico.clear()
-        self._refazer.clear()
-        self.alteracoes_pendentes = False
+        cidade = (self.documento or {}).get("cidade")
+        self._limpar_editor()
         apagar_autosave()
         self.atualizar_tudo(centralizar=True)
-        if self.cidade_atual:
-            self.tela_inicio.cidade = cidades.ler_cidade(self.cidade_atual["pasta"])
+        if cidade:
+            self.tela_inicio.cidade = cidade
         self.tela_inicio.mostrar()
 
-    def _abrir_caminho(self, caminho):
-        try:
-            rede = Rede.carregar(caminho)
-        except Exception as erro:
-            messagebox.showerror("Erro ao abrir", "%s\n\n%s" % (caminho, erro))
-            return False
-        self.rede = rede
-        self.caminho_atual = caminho
-        self.cidade_atual = cidades.cidade_do_arquivo(caminho)
-        if self.cidade_atual:
-            cidades.registrar_recente(self.cidade_atual["pasta"])
+    def _carregar_documento(self, cidade, diagrama_id, conteudo, versao, nao_enviado=False):
+        self.rede = Rede.from_dict(conteudo)
+        self.caminho_atual = None
+        self.documento = {"cidade": cidade, "id": diagrama_id, "versao": versao}
         self.porta_selecionada = None
         self.destaque = set()
         self._historico.clear()
         self._refazer.clear()
-        self.alteracoes_pendentes = False
+        self.alteracoes_pendentes = nao_enviado
         apagar_autosave()
         self.mostrar_editor()
         self.atualizar_tudo(centralizar=True)
-        return True
 
-    def abrir_diagrama(self, caminho):
+    def _erro_servidor(self, erro, titulo):
+        """Mensagem de erro do servidor; sessao vencida pede login de novo.
+        Devolve True se a pessoa entrou de novo (vale tentar outra vez)."""
+        if erro.status == 401:
+            dialogo = DialogEntrar(self)
+            if dialogo.conexao:
+                self.conexao = dialogo.conexao
+                return True
+            return False
+        messagebox.showwarning(titulo, str(erro))
+        return False
+
+    def abrir_diagrama(self, cidade, diagrama_id):
         if not self._confirmar_descarte("Abrir diagrama"):
             return False
-        return self._abrir_caminho(caminho)
+        guardado = nuvem.pendente_de(cidade["id"], diagrama_id)
+        if guardado:
+            # o que ficou neste PC sem chegar no servidor vale mais: abre ele
+            self._carregar_documento(cidade, diagrama_id, guardado["conteudo"],
+                                     guardado["versao_base"], nao_enviado=True)
+            self.status.config(text="Este diagrama tem alteracoes deste computador que ainda "
+                                    "nao chegaram no servidor (salve pra enviar).")
+            return True
+        if not self.conexao:
+            messagebox.showwarning("Abrir diagrama", "Entre no servidor primeiro.")
+            return False
+        try:
+            dados = self.conexao.abrir(cidade["id"], diagrama_id)
+        except nuvem.ErroServidor as erro:
+            if self._erro_servidor(erro, "Abrir diagrama"):
+                return self.abrir_diagrama(cidade, diagrama_id)
+            return False
+        try:
+            self._carregar_documento(cidade, diagrama_id, dados["conteudo"], dados["versao"])
+        except Exception as erro:
+            messagebox.showerror("Abrir diagrama", "O diagrama no servidor esta com defeito:\n%s"
+                                 % erro)
+            return False
+        return True
+
+    def _criar_no_servidor(self, cidade, nome, rede, titulo="Novo diagrama"):
+        if not self.conexao:
+            messagebox.showwarning(titulo, "Entre no servidor primeiro (tela inicial).")
+            return None
+        try:
+            return self.conexao.criar_diagrama(cidade["id"], nome, rede.to_dict())
+        except nuvem.ErroServidor as erro:
+            if self._erro_servidor(erro, titulo):
+                return self._criar_no_servidor(cidade, nome, rede, titulo)
+            if erro.sem_conexao:
+                messagebox.showwarning(titulo, "Sem conexao com o servidor: o diagrama novo so "
+                                               "pode ser criado com o servidor no ar.")
+            return None
 
     def novo_diagrama(self, cidade):
-        """Cria o diagrama de um local (POP / CEO / CTO) na pasta da cidade,
-        ja salvo, e abre no editor."""
+        """Cria o diagrama de um local (POP / CEO / CTO) na cidade, direto no
+        servidor, e abre no editor."""
         dialogo = DialogNovoDiagrama(self, cidade)
         if not dialogo.resultado:
             return None
         tipo, nome, marcar = dialogo.resultado
         rede = Rede()
         rede.definir_local({"tipo": tipo, "nome": nome, "cidade": cidade["titulo"]})
-        caminho = cidades.caminho_novo_diagrama(cidade["pasta"], nome)
-        try:
-            rede.salvar(caminho)
-        except OSError as erro:
-            messagebox.showerror("Novo diagrama", "Nao consegui criar o arquivo:\n%s\n\n%s"
-                                 % (caminho, erro))
+        criado = self._criar_no_servidor(cidade, nome, rede)
+        if not criado:
             return None
-        if not self._abrir_caminho(caminho):
-            return None
-        self.status.config(text="Diagrama criado em %s" % caminho)
+        self._carregar_documento(cidade, criado["id"], rede.to_dict(), criado["versao"])
+        self.status.config(text="Diagrama criado no servidor: %s / %s" % (cidade["titulo"], nome))
         if marcar:
             self.after(150, self.acao_local)
-        return caminho
+        return criado["id"]
 
-    def acao_nova(self):
-        if not self._confirmar_descarte("Nova rede"):
-            return
-        self.rede = Rede()
-        self.caminho_atual = None
-        self.porta_selecionada = None
-        self.destaque = set()
-        self._historico.clear()
-        self._refazer.clear()
-        self.alteracoes_pendentes = False
-        apagar_autosave()
-        self.mostrar_editor()
-        self.atualizar_tudo(centralizar=True)
-
-    def acao_abrir(self):
-        if not self._confirmar_descarte("Abrir outra rede"):
-            return
+    def importar_diagrama(self, cidade):
+        """Manda um .wasp.json deste computador pra cidade (no servidor)."""
         caminho = filedialog.askopenfilename(
-            title="Abrir rede",
-            initialdir=(self.cidade_atual or {}).get("pasta") or cidades.pasta_provedor() or None,
+            title="Importar diagrama para %s" % cidade["titulo"],
             filetypes=[("Rede WaspFiber (*%s)" % EXTENSAO, "*%s" % EXTENSAO),
                        ("Rede da versao Nix (*%s)" % EXTENSAO_NIX, "*%s" % EXTENSAO_NIX),
                        ("Arquivos da versao FTTX (*.json)", "*.json"),
                        ("Todos (*.*)", "*.*")])
         if not caminho:
-            return
-        self._abrir_caminho(caminho)
+            return None
+        if not self._confirmar_descarte("Importar diagrama"):
+            return None
+        try:
+            rede = Rede.carregar(caminho)
+        except Exception as erro:
+            messagebox.showerror("Importar diagrama", "%s\n\n%s" % (caminho, erro))
+            return None
+        nome = rede.local.get("nome") or os.path.basename(caminho).split(".")[0]
+        if not rede.local.get("cidade"):
+            rede.local["cidade"] = cidade["titulo"]
+        criado = self._criar_no_servidor(cidade, nome, rede, "Importar diagrama")
+        if not criado:
+            return None
+        self._carregar_documento(cidade, criado["id"], rede.to_dict(), criado["versao"])
+        self.status.config(text="Importado pro servidor: %s / %s" % (cidade["titulo"], nome))
+        return criado["id"]
+
+    def _cidade_em_uso(self):
+        return (self.documento or {}).get("cidade") or getattr(self.tela_inicio, "cidade", None)
+
+    def acao_nova(self):
+        cidade = self._cidade_em_uso()
+        if cidade and self.conexao:
+            if self._confirmar_descarte("Novo diagrama"):
+                self.novo_diagrama(cidade)
+        else:
+            self.mostrar_inicio()
+
+    def acao_abrir(self):
+        cidade = self._cidade_em_uso()
+        if cidade and self.conexao:
+            self.importar_diagrama(cidade)
+        else:
+            messagebox.showinfo("Importar diagrama", "Escolha a cidade na tela inicial antes "
+                                                    "de importar um arquivo.")
 
     def acao_salvar(self):
-        if not self.caminho_atual:
+        if not self.documento:
             return self.acao_salvar_como()
+        return self._salvar_no_servidor()
+
+    def _salvar_no_servidor(self, forcar=False):
+        doc = self.documento
+        cidade = doc["cidade"]
+        conteudo = self.rede.to_dict()
+        titulo = self.rede.local.get("nome") or doc["id"]
         try:
-            self.rede.salvar(self.caminho_atual)
-        except Exception as erro:
-            messagebox.showerror("Erro ao salvar", str(erro))
-            return
+            if not self.conexao:
+                raise nuvem.ErroServidor("Sem login no servidor.", sem_conexao=True)
+            r = self.conexao.salvar(cidade["id"], doc["id"], conteudo, doc["versao"], forcar)
+        except nuvem.ErroServidor as erro:
+            if erro.sem_conexao:
+                # guarda neste PC so ate o servidor voltar
+                nuvem.enfileirar(cidade["id"], doc["id"], conteudo, doc["versao"], titulo,
+                                 cidade["titulo"])
+                self.alteracoes_pendentes = False
+                apagar_autosave()
+                self.status.config(text="Sem conexao com o servidor: guardado neste computador "
+                                        "e enviado assim que o servidor voltar.")
+                self.atualizar_tudo()
+                return True
+            if erro.status == 409:
+                quem = erro.extra.get("alterado_por") or "outra pessoa"
+                quando = erro.extra.get("alterado_em") or ""
+                resposta = messagebox.askyesnocancel(
+                    "Outra pessoa salvou este diagrama",
+                    "%s salvou este diagrama no servidor%s, depois que voce abriu.\n\n"
+                    "Sim = salvar a sua versao por cima (a dela fica no historico do servidor)\n"
+                    "Nao = salvar a sua como uma COPIA\n"
+                    "Cancelar = voltar sem salvar" % (quem, (" em " + quando) if quando else ""))
+                if resposta is None:
+                    return False
+                if resposta:
+                    return self._salvar_no_servidor(forcar=True)
+                return self.acao_salvar_como()
+            if self._erro_servidor(erro, "Salvar"):
+                return self._salvar_no_servidor(forcar)
+            return False
+        doc["versao"] = r["versao"]
+        nuvem.tirar_da_fila(cidade["id"], doc["id"])
         self.alteracoes_pendentes = False
         apagar_autosave()
-        self.status.config(text="Salvo em %s" % self.caminho_atual)
+        self.status.config(text="Salvo no servidor: %s / %s" % (cidade["titulo"], titulo))
         self.atualizar_tudo()
+        return True
 
     def acao_salvar_como(self):
-        sugestao = cidades.nome_de_pasta(self.rede.local.get("nome")) or "rede"
-        caminho = filedialog.asksaveasfilename(
-            title="Salvar rede", defaultextension=EXTENSAO,
-            initialdir=(self.cidade_atual or {}).get("pasta") or cidades.pasta_provedor() or None,
-            initialfile=sugestao + EXTENSAO,
-            filetypes=[("Rede WaspFiber (*%s)" % EXTENSAO, "*%s" % EXTENSAO)])
-        if not caminho:
+        """Salva uma COPIA no servidor, com outro nome, na mesma cidade."""
+        cidade = self._cidade_em_uso()
+        if not cidade or not self.conexao:
+            messagebox.showinfo("Salvar", "Escolha a cidade na tela inicial (casinha) e crie o "
+                                          "diagrama por la: tudo fica no servidor.")
+            return False
+        atual = self.rede.local.get("nome") or "Diagrama"
+        nome = perguntar_texto("Salvar como copia", "Nome da copia (fica em %s, no servidor):"
+                               % cidade["titulo"], self,
+                               initialvalue=(atual + " (copia)") if self.documento else atual)
+        if not nome or not nome.strip():
+            return False
+        nome = nome.strip()
+        self.rede.local["nome"] = nome
+        criado = self._criar_no_servidor(cidade, nome, self.rede, "Salvar como copia")
+        if not criado:
+            return False
+        self.documento = {"cidade": cidade, "id": criado["id"], "versao": criado["versao"]}
+        self.alteracoes_pendentes = False
+        apagar_autosave()
+        self.status.config(text="Copia salva no servidor: %s / %s" % (cidade["titulo"], nome))
+        self.atualizar_tudo()
+        return True
+
+    def _sincronizar(self, avisar=False):
+        """Manda pro servidor o que ficou guardado sem conexao. Roda sozinho
+        a cada minuto (em segundo plano: nao trava a tela)."""
+        if getattr(self, "_sincronizando", False):
             return
-        self.caminho_atual = caminho
-        self.cidade_atual = cidades.cidade_do_arquivo(caminho)
-        self.acao_salvar()
+        if not self.conexao or not nuvem.pendentes():
+            if avisar:
+                self.status.config(text="Nada aguardando envio." if self.conexao else
+                                   "Entre no servidor pra enviar.")
+            return
+        self._sincronizando = True
+        conexao = self.conexao
+
+        def pronto(resultado, erro):
+            self._sincronizando = False
+            if erro or not resultado:
+                return
+            doc = self.documento
+            for item in resultado.get("detalhes", []):
+                if doc and item["cidade"] == doc["cidade"]["id"] and \
+                        item["diagrama"] == doc["id"] and item.get("versao"):
+                    doc["versao"] = item["versao"]
+            partes = []
+            if resultado["enviados"]:
+                partes.append("%d enviado(s) pro servidor" % len(resultado["enviados"]))
+            if resultado["copias"]:
+                partes.append("%d virou(aram) copia porque alguem salvou antes: %s"
+                              % (len(resultado["copias"]), ", ".join(resultado["copias"])))
+            if resultado["falhou"] and avisar:
+                partes.append("o servidor ainda nao respondeu")
+            if partes:
+                self.status.config(text="Diagramas guardados neste PC: " + "; ".join(partes) + ".")
+            if self.tela_inicio.visivel() and (resultado["enviados"] or resultado["copias"]):
+                self.tela_inicio.atualizar()
+            else:
+                self.tela_inicio.atualizar_pendentes()
+            self._atualizar_cabecalho()
+        em_segundo_plano(self, lambda: nuvem.enviar_pendentes(conexao), pronto)
+
+    def _sincronizar_periodico(self):
+        self._sincronizar()
+        self.after(60000, self._sincronizar_periodico)
 
     def acao_exemplo(self):
+        # B0.38: saiu da interface (menu, paleta e telas). Fica so pro
+        # autoteste e pros testes automaticos.
         if not self._confirmar_descarte("Carregar rede de exemplo"):
             return
         self.rede = rede_exemplo()
         self.caminho_atual = None
-        self.cidade_atual = None
+        self.documento = None
         self.porta_selecionada = None
         self.destaque = set()
         self._historico.clear()
@@ -6241,7 +6505,8 @@ class App(tk.Tk):
             "INICIO (casinha no topo): as CIDADES e os DIAGRAMAS de cada uma. Cada "
             "cidade e uma pasta; cada POP, caixa de emenda ou CTO e um diagrama dentro "
             "dela. Use uma pasta compartilhada no servidor pra equipe toda.\n\n"
-            "1. Comece pela rede de exemplo (Ctrl+K > exemplo) pra ver funcionando.\n\n"
+            "1. Na tela inicial (casinha), escolha a cidade e abra ou crie o diagrama "
+            "do POP, da caixa de emenda ou da CTO.\n\n"
             "2. O + da barra lateral cadastra um equipamento (DIO, CABO, acomodador, "
             "OLT, switch, RB); o icone ao lado cria "
             "varios de uma vez (DIO-01 ... DIO-24).\n\n"

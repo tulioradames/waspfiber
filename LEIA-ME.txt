@@ -1,4 +1,4 @@
-WASPFIBER - diagramas de fusao e fibra optica (FTTX)         versao B0.37
+WASPFIBER - diagramas de fusao e fibra optica (FTTX)         versao B0.40
 =========================================================================
 
 COMO ABRIR
@@ -8,12 +8,56 @@ Na primeira vez o Windows pode avisar "O Windows protegeu o computador":
 clique em "Mais informacoes" > "Executar assim mesmo".
 
 
+O QUE MUDOU NA B0.40 (funciona fora da empresa)
+-----------------------------------------------
+- O SERVIDOR ESTA NA INTERNET, com HTTPS (tudo criptografado):
+      https://servidor.taild43fdd.ts.net
+  Funciona de qualquer lugar: escritorio, campo, outros provedores. E o
+  endereco que ja vem preenchido no login. Dentro da empresa tambem da
+  pra usar o endereco interno http://192.168.102.83:8765.
+- SEGURANCA: 5 senhas erradas seguidas travam aquele login por 15 minutos.
+- BACKUP AUTOMATICO: o servidor guarda uma copia completa por dia (das
+  ultimas 14) em ~/waspfiber-backups.
+- Pra criar empresas e usuarios no servidor:
+      bash ~/waspfiber-servidor/criar-acesso.sh
+
+
+O QUE MUDOU NA B0.39 (tudo no servidor)
+---------------------------------------
+- AS CIDADES E OS DIAGRAMAS FICAM NO SERVIDOR, nao mais no computador.
+  O programa abre pedindo o login: servidor, empresa, usuario e senha.
+  O login fica lembrado (a senha nunca e guardada no PC).
+- CADA EMPRESA SO VE AS PROPRIAS CIDADES. Varias pessoas da mesma
+  empresa veem a mesma lista e os mesmos diagramas.
+- SALVAR (Ctrl+S) grava no servidor. A lista mostra quem alterou e quando.
+- DUAS PESSOAS NO MESMO DIAGRAMA: se alguem salvou depois que voce abriu,
+  o programa avisa quem foi e pergunta: salvar por cima (a versao da outra
+  pessoa fica guardada no historico do servidor) ou salvar como copia.
+- O SERVIDOR GUARDA AS ULTIMAS 30 VERSOES de cada diagrama.
+- SEM CONEXAO: ao salvar sem servidor, o diagrama fica guardado neste
+  computador so ate o servidor voltar; o envio e automatico (a cada
+  minuto) e o topo mostra "aguardando envio ao servidor". Se alguem
+  salvou o mesmo diagrama nesse meio tempo, o que estava guardado vira
+  uma copia - nao se perde o trabalho de ninguem.
+- IMPORTAR ARQUIVO: manda um .wasp.json antigo deste computador pra
+  cidade escolhida, no servidor. "Salvar como copia" cria outro diagrama
+  na mesma cidade.
+- O SERVIDOR (pasta servidor/ do projeto) e um programa em Python, sem
+  dependencias, que roda no Linux da empresa como servico.
+
+
+O QUE MUDOU NA B0.38 (a vespa de volta, sem rede de exemplo)
+-------------------------------------------------------------
+- A MARCA VOLTA A SER A VESPA (o favo da B0.37 saiu). Pra ela aparecer
+  no tema escuro, ganhou um contorno claro com um brilho ciano, e no topo
+  do programa usa so a vespa e as asas (o rastro de fibras ficaria
+  borrado em tamanho pequeno). O icone do .exe tambem e a vespa.
+- A REDE DE EXEMPLO SAIU do programa: menu, paleta (Ctrl+K) e telas.
+  Comece pela tela inicial: escolha a cidade e abra ou crie o diagrama.
+
+
 O QUE MUDOU NA B0.37 (visual novo)
 ----------------------------------
-- MARCA NOVA: um favo (a casa da vespa) em degrade ciano e verde, com um
-  W feito de fibra e os conectores nas pontas. Bem visivel em qualquer
-  tamanho: no topo do programa, na barra de tarefas e no icone do .exe.
-  A vespa continua como ilustracao nas telas vazias.
 - TELAS EM CAMADAS, nada mais "tudo a mesma cor": o topo e a coluna das
   cidades num tom, a area de trabalho (diagramas e o desenho) mais escura
   e os itens em cartoes por cima.
@@ -363,8 +407,8 @@ O QUE JA VINHA DA VERSAO ANTERIOR
 
 COMO USAR
 ---------
-1. Ctrl+K > digite "exemplo" > Enter, pra ver o programa funcionando
-   (ou o botao "Ver a rede de exemplo" quando a rede esta vazia).
+1. Na tela inicial, cadastre a cidade (ou abra a pasta dela) e crie o
+   diagrama do POP, da caixa de emenda ou da CTO.
 
 2. O "+" da barra lateral cadastra um equipamento:
    - DIO         -> informe a quantidade de portas. Cada porta tem
@@ -456,7 +500,7 @@ QUEM QUISER MEXER NO CODIGO
 ---------------------------
 O programa e o waspfiber.py (modelo, desenho, exportacoes e janela), mais
 o waspfiber_ui.py (botoes, menus, cartoes), o waspfiber_mapa.py (localizacao,
-mapa e links do Google), o waspfiber_cidades.py (cidades e diagramas) e o waspfiber_icones.py (icones Lucide, licenca ISC,
+mapa e links do Google), o waspfiber_nuvem.py (login e conversa com o servidor) e o waspfiber_icones.py (icones Lucide, licenca ISC,
 ja embutidos). Nenhuma dependencia externa: so precisa do
 Python 3.8+ com tkinter, que ja vem junto no Windows.
 Pra rodar direto: python waspfiber.py

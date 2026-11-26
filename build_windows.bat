@@ -5,7 +5,7 @@ setlocal
 cd /d "%~dp0"
 python -m pip install pyinstaller || goto :erro
 python -m PyInstaller --noconfirm --onefile --windowed --name WaspFiber --icon waspfiber.ico ^
-  --hidden-import waspfiber_ui --hidden-import waspfiber_icones --hidden-import waspfiber_mapa --hidden-import waspfiber_cidades ^
+  --hidden-import waspfiber_ui --hidden-import waspfiber_icones --hidden-import waspfiber_mapa --hidden-import waspfiber_nuvem ^
   --exclude-module matplotlib --exclude-module numpy --exclude-module PIL waspfiber.py || goto :erro
 echo.
 echo Pronto: dist\WaspFiber.exe

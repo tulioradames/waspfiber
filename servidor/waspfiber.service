@@ -1,0 +1,16 @@
+# Servico do usuario (systemd --user) do Servidor WaspFiber.
+# Instalar:  ~/.config/systemd/user/waspfiber.service
+#            systemctl --user daemon-reload && systemctl --user enable --now waspfiber
+# Pra continuar rodando sem ninguem logado (e depois de reiniciar):
+#            sudo loginctl enable-linger $USER
+[Unit]
+Description=Servidor WaspFiber (diagramas FTTH)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/waspfiber-servidor/waspfiber_servidor.py servir --dados %h/waspfiber-dados --porta 8765
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

@@ -455,62 +455,6 @@ checar(mapa.fonte_inicial() == "mapa", "fonte desconhecida (versao antiga) volta
 checar(not hasattr(mapa, "chave_google") and not hasattr(mapa, "URL_GOOGLE"),
        "sem integracao com a API do Google")
 
-print("== cidades (B0.36) ==")
-import waspfiber_cidades as cid
-prov = tempfile.mkdtemp(prefix="waspfiber_provedor_")
-checar(cid.nome_de_pasta('CTO: Rua/Flores*01?') == "CTO Rua Flores 01", "nome de arquivo valido",
-       cid.nome_de_pasta('CTO: Rua/Flores*01?'))
-checar(cid.nome_de_pasta("Sao José") == "Sao José", "mantem acento no nome da pasta")
-c1 = cid.criar_cidade(prov, "Santos", "sp")
-checar(c1["titulo"] == "Santos - SP" and os.path.isfile(os.path.join(prov, "Santos - SP", "cidade.json")),
-       "cria a pasta da cidade com cidade.json", c1)
-try:
-    cid.criar_cidade(prov, "Santos", "SP")
-    checar(False, "nao deixa cidade repetida")
-except ValueError:
-    checar(True, "nao deixa cidade repetida")
-try:
-    cid.criar_cidade(prov, "X", "ZZ")
-    checar(False, "UF invalida")
-except ValueError:
-    checar(True, "UF invalida")
-c2 = cid.criar_cidade(prov, "Águas de Lindóia", "SP")
-os.makedirs(os.path.join(prov, "pasta qualquer"))
-checar([c["nome"] for c in cid.listar_cidades(prov)] == ["Águas de Lindóia", "Santos"],
-       "lista as cidades em ordem (ignora pasta que nao e cidade)")
-solta = os.path.join(tempfile.mkdtemp(), "Guaruja - SP")
-os.makedirs(solta)
-cg = cid.abrir_pasta_como_cidade(solta)
-checar(cg["nome"] == "Guaruja" and cg["uf"] == "SP", "abrir pasta qualquer vira cidade (le a UF do nome)")
-checar(cid.listar_diagramas(c1["pasta"]) == [], "cidade nova sem diagramas")
-for tipo, nome in (("CTO", "CTO Rua A 01"), ("POP", "POP Centro"), ("CEO", "CEO-012")):
-    rd = Rede()
-    rd.definir_local({"tipo": tipo, "nome": nome, "endereco": "Rua A", "lat": -23.9, "lon": -46.3})
-    rd.add_equipamento("DIO", TIPO_DIO, 12)
-    rd.salvar(cid.caminho_novo_diagrama(c1["pasta"], nome))
-with open(os.path.join(c1["pasta"], "quebrado.wasp.json"), "w") as fp:
-    fp.write("{nao e json")
-lista = cid.listar_diagramas(c1["pasta"])
-checar([i["tipo"] for i in lista] == ["POP", "CEO", "CTO", ""], "diagramas: POP, CEO, CTO e depois o resto",
-       [i["tipo"] for i in lista])
-checar(lista[0]["titulo"] == "POP Centro" and lista[0]["equipamentos"] == 1 and lista[0]["tem_coordenada"],
-       "resumo do diagrama", lista[0])
-checar(lista[-1]["erro"].startswith("arquivo com defeito"), "arquivo com defeito aparece na lista")
-novo = cid.caminho_novo_diagrama(c1["pasta"], "POP Centro")
-checar(os.path.basename(novo) == "POP Centro (2).wasp.json", "nao sobrescreve diagrama existente", novo)
-checar(cid.cidade_do_arquivo(lista[0]["caminho"])["titulo"] == "Santos - SP", "cidade do arquivo")
-checar(cid.cidade_do_arquivo(os.path.join(prov, "x.wasp.json")) is None, "arquivo fora de cidade")
-checar(cid.pasta_provedor() == "" and cid.cidades_conhecidas() == [], "sem pasta escolhida: nenhuma cidade")
-cid.definir_pasta_provedor(prov)
-cid.registrar_recente(solta)
-cid.registrar_recente(c1["pasta"])
-titulos = [c["titulo"] for c in cid.cidades_conhecidas()]
-checar(titulos == ["Águas de Lindóia - SP", "Santos - SP", "Guaruja - SP"],
-       "cidades da pasta + recentes de fora", titulos)
-checar(cid.ultima_cidade() == os.path.abspath(c1["pasta"]), "lembra a ultima cidade")
-cid.esquecer_cidade(solta)
-checar(len(cid.cidades_conhecidas()) == 2 and os.path.isdir(solta), "esquecer cidade nao apaga a pasta")
-
 print("== limites ==")
 montar_cena(Rede())
 checar(True, "rede vazia nao quebra o desenho")
