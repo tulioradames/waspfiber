@@ -84,6 +84,7 @@ import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 @Composable
 fun TelaMapa(cidade: Cidade, aoVoltar: () -> Unit,
              aoEquipamento: (ItemDiagrama?, GeoPoint?) -> Unit,
+             aoFusoes: (ItemDiagrama) -> Unit,
              tratar: (ErroServidor) -> String) {
     val ctx = LocalContext.current
     val escopo = rememberCoroutineScope()
@@ -267,7 +268,8 @@ fun TelaMapa(cidade: Cidade, aoVoltar: () -> Unit,
             escolhido?.let { item ->
                 CartaoEquipamento(item, Modifier.align(Alignment.BottomCenter).padding(10.dp),
                                   aoDetalhes = { aoEquipamento(item, null) },
-                                  aoCorrigir = { corrigir = item })
+                                  aoCorrigir = { corrigir = item },
+                                  aoFusoes = { aoFusoes(item) })
             }
         }
     }
@@ -344,7 +346,7 @@ fun Selo(tipo: String) {
 
 @Composable
 private fun CartaoEquipamento(item: ItemDiagrama, modifier: Modifier,
-                              aoDetalhes: () -> Unit, aoCorrigir: () -> Unit) {
+                              aoDetalhes: () -> Unit, aoCorrigir: () -> Unit, aoFusoes: () -> Unit) {
     Card(modifier = modifier.fillMaxWidth(),
          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(16.dp)) {
@@ -365,8 +367,10 @@ private fun CartaoEquipamento(item: ItemDiagrama, modifier: Modifier,
                     Icon(Icons.Default.MyLocation, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp)); Text("Minha posicao")
                 }
-                Button(onClick = aoDetalhes, modifier = Modifier.weight(1f)) { Text("Detalhes") }
+                OutlinedButton(onClick = aoDetalhes, modifier = Modifier.weight(1f)) { Text("Detalhes") }
             }
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = aoFusoes, modifier = Modifier.fillMaxWidth()) { Text("Diagrama de fusao") }
         }
     }
 }

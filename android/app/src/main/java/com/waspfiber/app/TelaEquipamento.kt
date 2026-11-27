@@ -63,7 +63,7 @@ import org.osmdroid.util.GeoPoint
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TelaEquipamento(cidade: Cidade, item: ItemDiagrama?, ponto: GeoPoint?, aoVoltar: () -> Unit,
-                    tratar: (ErroServidor) -> String) {
+                    aoFusoes: (ItemDiagrama) -> Unit, tratar: (ErroServidor) -> String) {
     val ctx = LocalContext.current
     val escopo = rememberCoroutineScope()
     var tipo by remember { mutableStateOf(item?.tipo?.ifEmpty { "CTO" } ?: "CTO") }
@@ -220,6 +220,9 @@ fun TelaEquipamento(cidade: Cidade, item: ItemDiagrama?, ponto: GeoPoint?, aoVol
                 Text("${d.optJSONArray("equipamentos")?.length() ?: 0} equipamento(s) e " +
                      "${d.optJSONArray("fusoes")?.length() ?: 0} fusao(oes) neste diagrama",
                      color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                OutlinedButton(onClick = { aoFusoes(item) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Abrir diagrama de fusao")
+                }
             }
             if (mensagem.isNotEmpty()) Text(mensagem, color = MaterialTheme.colorScheme.error)
             Button(onClick = { salvar() }, enabled = !salvando,

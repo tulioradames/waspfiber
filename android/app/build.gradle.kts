@@ -24,8 +24,8 @@ android {
         applicationId = "com.waspfiber.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "M0.1"
+        versionCode = 2
+        versionName = "M0.2"
     }
 
     signingConfigs {

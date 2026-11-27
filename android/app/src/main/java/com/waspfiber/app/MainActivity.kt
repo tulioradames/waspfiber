@@ -25,6 +25,8 @@ sealed interface Tela {
     data class Mapa(val cidade: Cidade) : Tela
     /** item == null: equipamento novo (no ponto sugerido) */
     data class Equipamento(val cidade: Cidade, val item: ItemDiagrama?, val ponto: GeoPoint?) : Tela
+    /** o diagrama de fusao do POP / CEO / CTO */
+    data class Fusoes(val cidade: Cidade, val item: ItemDiagrama) : Tela
 }
 
 val Cores = darkColorScheme(
@@ -93,8 +95,12 @@ fun App() {
                                     aoSair = { sair() }, tratar = ::tratar)
         is Tela.Mapa -> TelaMapa(tela.cidade, aoVoltar = ::voltar,
                                  aoEquipamento = { item, ponto -> ir(Tela.Equipamento(tela.cidade, item, ponto)) },
+                                 aoFusoes = { ir(Tela.Fusoes(tela.cidade, it)) },
                                  tratar = ::tratar)
         is Tela.Equipamento -> TelaEquipamento(tela.cidade, tela.item, tela.ponto,
-                                               aoVoltar = ::voltar, tratar = ::tratar)
+                                               aoVoltar = ::voltar,
+                                               aoFusoes = { ir(Tela.Fusoes(tela.cidade, it)) },
+                                               tratar = ::tratar)
+        is Tela.Fusoes -> TelaFusoes(tela.cidade, tela.item, aoVoltar = ::voltar, tratar = ::tratar)
     }
 }
