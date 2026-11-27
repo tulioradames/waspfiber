@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- POP: rack (mesmo desenho do programa de PC) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="2"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M6,2.5 H18 A2,2 0 0 1 20,4.5 V19.5 A2,2 0 0 1 18,21.5 H6 A2,2 0 0 1 4,19.5 V4.5 A2,2 0 0 1 6,2.5 Z" />
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M8,7.5 H16 M8,12 H16 M8,16.5 H12" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M15,16.5 a1,1 0 1,0 2,0 a1,1 0 1,0 -2,0" />
+</vector>

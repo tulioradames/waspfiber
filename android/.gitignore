@@ -1,0 +1,12 @@
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+captures/
+# assinatura do APK: NUNCA no git
+assinatura.properties
+*.p12
+*.jks
+*.keystore
