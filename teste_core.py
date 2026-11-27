@@ -455,6 +455,29 @@ checar(mapa.fonte_inicial() == "mapa", "fonte desconhecida (versao antiga) volta
 checar(not hasattr(mapa, "chave_google") and not hasattr(mapa, "URL_GOOGLE"),
        "sem integracao com a API do Google")
 
+print("== satelite ate o zoom 18 (B0.43) ==")
+import io, urllib.error
+checar(mapa.FONTES["satelite"]["zoom_max"] == 18 and mapa.FONTES["mapa"]["zoom_max"] == 19,
+       "satelite vai ate o zoom 18, ruas ate o 19")
+_pedir_original = mapa._pedir
+mapa._pedir = lambda url, dados=None, tempo=15: (_ for _ in ()).throw(
+    urllib.error.HTTPError(url, 500, "erro", {}, io.BytesIO(b"")))
+try:
+    mapa.baixar_tile("satelite", 19, 1, 1, pasta=tempfile.mkdtemp())
+    checar(False, "servidor sem foto: erro 'sem imagem'")
+except mapa.ErroMapa as erro:
+    checar(erro.sem_imagem, "servidor sem foto: erro 'sem imagem' (nao e falta de conexao)")
+mapa._pedir = lambda url, dados=None, tempo=15: (_ for _ in ()).throw(
+    urllib.error.URLError("sem rede"))
+try:
+    mapa.baixar_tile("satelite", 17, 1, 1, pasta=tempfile.mkdtemp())
+    checar(False, "sem internet continua sendo erro de conexao")
+except mapa.ErroMapa:
+    checar(False, "sem internet continua sendo erro de conexao")
+except urllib.error.URLError:
+    checar(True, "sem internet continua sendo erro de conexao")
+mapa._pedir = _pedir_original
+
 print("== limites ==")
 montar_cena(Rede())
 checar(True, "rede vazia nao quebra o desenho")

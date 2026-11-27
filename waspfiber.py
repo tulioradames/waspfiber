@@ -31,7 +31,7 @@ import waspfiber_mapa as mapa   # localizacao do diagrama (B0.34)
 import waspfiber_nuvem as nuvem   # servidor: login, cidades e diagramas (B0.39)
 
 APP_NOME = "WaspFiber"
-VERSAO = "B0.42"
+VERSAO = "B0.43"
 EXTENSAO = ".wasp.json"
 EXTENSAO_NIX = ".nix.json"      # redes salvas quando o programa se chamava Nix
 

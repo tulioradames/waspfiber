@@ -837,6 +837,26 @@ app.update()
 app.acao_exemplo()
 app.update()
 
+print("== satelite ate o zoom 18 (B0.43) ==")
+_t = fttx.tk.Toplevel(app)
+_m = fttx.mapa.MapaWidget(_t, fttx.TEMA, fonte="satelite", centro=(-7.23, -35.88), zoom=19,
+                          baixador=lambda f, z, x, y: (_ for _ in ()).throw(
+                              fttx.mapa.ErroMapa("sem imagem neste zoom (500)", sem_imagem=True)))
+_m.pack()
+checar(_m.zoom == 18, "satelite abre no maximo no zoom 18", _m.zoom)
+_m._roda(__import__("types").SimpleNamespace(x=100, y=100, delta=120))
+checar(_m.zoom == 18, "roda do mouse nao passa do 18 no satelite")
+for _ in range(30):
+    _t.update()
+    __import__("time").sleep(0.02)
+checar(_m._falhas and _m.erro_rede is None, "falta de foto nao vira aviso de 'sem conexao'")
+_m.trocar_fonte("mapa")
+_m.aplicar_zoom(+1)
+checar(_m.zoom == 19, "no mapa de ruas da pra ir ate o 19")
+_m.trocar_fonte("satelite")
+checar(_m.zoom == 18, "voltando pro satelite, o zoom desce pro 18")
+_t.destroy()
+
 print("== rede vazia ==")
 app.rede = fttx.Rede()
 app.atualizar_tudo(centralizar=True)

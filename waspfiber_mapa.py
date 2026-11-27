@@ -46,7 +46,9 @@ FONTES = {
     "mapa": {"rotulo": "Mapa", "zoom_max": 19,
              "url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
              "credito": "© colaboradores do OpenStreetMap"},
-    "satelite": {"rotulo": "Satelite", "zoom_max": 19,
+    # zoom 18 e o maximo confiavel do satelite: no 19 a Esri nao tem foto em
+    # muitos lugares (responde erro) - B0.43
+    "satelite": {"rotulo": "Satelite", "zoom_max": 18,
                  # o servico de tiles da Esri entrega JPEG (o Tk nao le sem
                  # PIL); o "export" da mesma camada entrega PNG do mesmo recorte
                  "url": ("https://server.arcgisonline.com/ArcGIS/rest/services/"
@@ -329,7 +331,13 @@ def gravar_ultima_vista(lat, lon, zoom, pasta=None):
 # ============================================================================
 
 class ErroMapa(Exception):
-    """Erro do servidor do mapa, ja com a mensagem pra pessoa."""
+    """Erro do servidor do mapa, ja com a mensagem pra pessoa.
+    sem_imagem=True: o servidor respondeu, so nao tem foto desse pedaco/zoom
+    (nao e falta de conexao)."""
+
+    def __init__(self, mensagem, sem_imagem=False):
+        super().__init__(mensagem)
+        self.sem_imagem = sem_imagem
 
 
 def _pedir(url, dados=None, tempo=15):
@@ -354,9 +362,14 @@ def baixar_tile(fonte, zoom, x, y, pasta=None):
             dados = fp.read()
         if dados[:4] == b"\x89PNG":
             return dados
-    dados = _pedir(url_do_tile(fonte, zoom, x, y))
+    try:
+        dados = _pedir(url_do_tile(fonte, zoom, x, y))
+    except urllib.error.HTTPError as erro:
+        # o servidor respondeu, so nao tem imagem desse pedaco/zoom: nao e falta
+        # de conexao (o mapa mostra a imagem ampliada do zoom anterior)
+        raise ErroMapa("sem imagem neste zoom (%s)" % erro.code, sem_imagem=True)
     if dados[:4] != b"\x89PNG":
-        raise ErroMapa("o servidor do mapa nao devolveu uma imagem PNG")
+        raise ErroMapa("sem imagem neste zoom", sem_imagem=True)
     try:
         os.makedirs(os.path.dirname(caminho), exist_ok=True)
         with open(caminho, "wb") as fp:
@@ -423,6 +436,7 @@ class MapaWidget(tk.Canvas):
         self.lat, self.lon = centro if centro else vista[:2]
         self.zoom = zoom if zoom is not None else (17 if centro else vista[2])
         self.fonte = fonte if fonte in FONTES else fonte_inicial()
+        self.zoom = min(self.zoom, self.zoom_max())    # satelite vai so ate o 18
         self.marcador = None                  # (lat, lon)
         self.ao_marcar = ao_marcar
         self.baixador = baixador or baixar_tile
@@ -493,7 +507,8 @@ class MapaWidget(tk.Canvas):
                 self._em_andamento.discard(chave)
             if isinstance(resultado, Exception):
                 self._falhas.add(chave)
-                self.erro_rede = str(resultado)
+                if not getattr(resultado, "sem_imagem", False):
+                    self.erro_rede = str(resultado)     # so falta de conexao avisa
                 chegou = True
                 continue
             try:

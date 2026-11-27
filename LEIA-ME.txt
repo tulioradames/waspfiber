@@ -1,4 +1,4 @@
-WASPFIBER - diagramas de fusao e fibra optica (FTTX)         versao B0.42
+WASPFIBER - diagramas de fusao e fibra optica (FTTX)         versao B0.43
 =========================================================================
 
 COMO ABRIR
@@ -6,6 +6,15 @@ COMO ABRIR
 Clique duas vezes em WaspFiber.exe. E isso - nao precisa instalar nada.
 Na primeira vez o Windows pode avisar "O Windows protegeu o computador":
 clique em "Mais informacoes" > "Executar assim mesmo".
+
+
+O QUE MUDOU NA B0.43 (zoom do satelite)
+---------------------------------------
+- O SATELITE VAI ATE O ZOOM 18: mais perto que isso o servidor de imagens
+  nao tem foto em muitos lugares. Trocando pro satelite com zoom maior, ele
+  volta pro 18. O mapa de ruas continua indo ate o 19.
+- "SEM CONEXAO" SO QUANDO E FALTA DE CONEXAO: se faltar foto de algum
+  pedaco, o mapa mostra a imagem ampliada do zoom anterior, sem o aviso.
 
 
 O QUE MUDOU NA B0.42 (escolher a empresa e o e-mail vem pronto)
