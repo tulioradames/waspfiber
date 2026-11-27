@@ -52,7 +52,7 @@ import unicodedata
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSAO_SERVIDOR = "B0.42"
+VERSAO_SERVIDOR = "B0.44"
 EXTENSAO = ".wasp.json"
 MAX_CORPO = 25 * 1024 * 1024
 DIAS_SESSAO = 30
@@ -394,6 +394,13 @@ class Armazem:
                         equipamentos=len(dados.get("equipamentos") or []),
                         fusoes=len(dados.get("fusoes") or []),
                         alterado_por=meta.get("alterado_por", ""))
+            # B0.44: coordenada pro mapa da cidade
+            try:
+                lat, lon = float(local.get("lat")), float(local.get("lon"))
+                if -90 <= lat <= 90 and -180 <= lon <= 180:
+                    item.update(lat=lat, lon=lon)
+            except (TypeError, ValueError):
+                item["tem_coordenada"] = False
         except Exception as erro:
             item["erro"] = "arquivo com defeito (%s)" % erro.__class__.__name__
         return item

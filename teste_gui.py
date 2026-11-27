@@ -770,8 +770,8 @@ app.update()
 linhas = tela.linhas_diagrama
 checar(list(linhas) == [did] and "4 equipamentos" in linhas[did].lbl_detalhe.cget("text"),
        "volta pro inicio e a lista mostra o que esta no servidor", linhas[did].lbl_detalhe.cget("text"))
-checar("Tulio" in linhas[did].lbl_direita.cget("text"), "lista mostra quem alterou",
-       linhas[did].lbl_direita.cget("text"))
+checar("por Tulio" in linhas[did].lbl_detalhe.cget("text"), "lista mostra quem alterou",
+       linhas[did].lbl_detalhe.cget("text"))
 tela._escolher_diagrama({"id": did})
 tela.abrir_escolhido()
 app.update()
@@ -784,6 +784,49 @@ checar(not tela.visivel(), "alteracao nao salva: cancelar fica no editor")
 mb.askyesnocancel = lambda *a, **k: False
 app.mostrar_inicio()
 checar(tela.visivel(), "descartar volta pro inicio")
+
+print("== mapa da cidade (B0.44) ==")
+checar(tela.mapa_cidade.marcadores == [] and "Nenhum equipamento" in tela.mapa_cidade.aviso,
+       "cidade sem coordenadas: mapa avisa", tela.mapa_cidade.aviso)
+from waspfiber import Rede as _Rede
+for _tipo, _nome, _lat, _lon in (("POP", "POP Centro", -23.9350, -46.3280),
+                                 ("CEO", "CEO-012", -23.9600, -46.3300)):
+    _r = _Rede()
+    _r.definir_local({"tipo": _tipo, "nome": _nome, "lat": _lat, "lon": _lon})
+    outra.criar_diagrama("santos-sp", _nome, _r.to_dict())
+tela.listar_diagramas()
+app.update()
+_ms = tela.mapa_cidade.marcadores
+checar(sorted(m["tipo"] for m in _ms) == ["CEO", "POP"] and not tela.mapa_cidade.aviso,
+       "mapa da cidade mostra os equipamentos com coordenada", [m["titulo"] for m in _ms])
+_w, _h = tela.mapa_cidade._tamanho()
+_xs = [tela.mapa_cidade.tela_do_ponto(m["lat"], m["lon"]) for m in _ms]
+checar(all(0 < x < _w and 0 < y < _h for x, y in _xs), "o mapa se enquadra nos equipamentos", _xs)
+_pop = next(m for m in _ms if m["tipo"] == "POP")
+_x, _y = tela.mapa_cidade.tela_do_ponto(_pop["lat"], _pop["lon"])
+checar(tela.mapa_cidade.marcador_em(_x, _y - 22)["id"] == _pop["id"], "achar o pino debaixo do mouse")
+_ev = __import__("types").SimpleNamespace(x=_x, y=_y - 22, delta=0)
+tela.mapa_cidade._press(_ev)
+tela.mapa_cidade._release(_ev)
+app.update()
+checar(tela.diagrama_escolhido == _pop["id"] and tela.linhas_diagrama[_pop["id"]].selecionado,
+       "clicar no pino escolhe o equipamento na lista")
+_ceo = next(i for i in tela.itens if i["tipo"] == "CEO")
+tela._escolher_diagrama(_ceo, no_mapa=True)
+checar(tela.mapa_cidade.escolhido == _ceo["id"], "clicar na lista destaca o pino no mapa")
+checar(tela.linhas_diagrama[_ceo["id"]].cor_icone == "ceo", "icone do tipo na cor do tipo (CEO)")
+abriu = []
+_orig_abrir = app.abrir_diagrama
+app.abrir_diagrama = lambda c, d: abriu.append(d)
+tela.mapa_cidade._duplo(_ev)
+app.abrir_diagrama = _orig_abrir
+checar(abriu == [_pop["id"]], "duplo clique no pino abre o diagrama")
+_f = tela.mapa_cidade.fonte
+tela._trocar_fonte_mapa()
+checar(tela.mapa_cidade.fonte != _f and tela.bt_fonte_mapa.cget("text") in ("Mapa", "Satelite"),
+       "botao troca mapa / satelite")
+tela._trocar_fonte_mapa()
+checar(fttx.mapa.TIPOS_LOCAL[1] == ("CEO", "CEO"), "tipo 'CEO' (sem 'Caixa de emenda')")
 print("== criar conta e pedidos de acesso (B0.41) ==")
 checar(tela.bt_pedidos.winfo_ismapped() and tela.bt_pedidos.cget("text") == "Pedidos de acesso",
        "administrador ve o botao de pedidos de acesso")

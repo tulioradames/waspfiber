@@ -31,7 +31,7 @@ import waspfiber_mapa as mapa   # localizacao do diagrama (B0.34)
 import waspfiber_nuvem as nuvem   # servidor: login, cidades e diagramas (B0.39)
 
 APP_NOME = "WaspFiber"
-VERSAO = "B0.43"
+VERSAO = "B0.44"
 EXTENSAO = ".wasp.json"
 EXTENSAO_NIX = ".nix.json"      # redes salvas quando o programa se chamava Nix
 
@@ -4187,7 +4187,9 @@ class DialogPendencias(tk.Toplevel):
 #  TELA INICIAL: CIDADES E DIAGRAMAS (B0.36)
 # ============================================================================
 
-ICONE_LOCAL = {"POP": "server", "CEO": "cable", "CTO": "split"}
+# icone de cada tipo de local (desenho proprio, B0.44) e a variante na cor do tipo
+ICONE_LOCAL = {"POP": "local-pop", "CEO": "local-ceo", "CTO": "local-cto"}
+COR_ICONE_LOCAL = {"POP": "pop", "CEO": "ceo", "CTO": "cto"}
 
 
 class DialogNovoDiagrama(DialogoBase):
@@ -4235,7 +4237,7 @@ def misturar(cor_a, cor_b, fracao):
 
 
 # cor de cada tipo de local (selo na lista e, depois, o pino no mapa)
-COR_LOCAL = {"POP": "#b39dfa", "CEO": "#f2b84b", "CTO": "#4dd0e1"}
+COR_LOCAL = {"POP": "#b39dfa", "CEO": "#f2b84b", "CTO": "#5ad18a"}
 
 
 class Selo(tk.Label):
@@ -4254,9 +4256,9 @@ class LinhaLista(tk.Frame):
 
     def __init__(self, pai, tema, icone, titulo, detalhe="", direita="", ao_clicar=None,
                  ao_duplo=None, fonte="TkDefaultFont", estilo="lista", selo=None,
-                 fonte_titulo=None):
+                 fonte_titulo=None, cor_icone=None):
         self.tema, self.estilo, self.selecionado = tema, estilo, False
-        self.nome_icone = icone
+        self.nome_icone, self.cor_icone = icone, cor_icone
         cartao = estilo == "cartao"
         self.cor_base = tema["ui_painel"] if cartao else tema["ui_fundo"]
         super().__init__(pai, bg=self.cor_base, cursor="hand2",
@@ -4264,7 +4266,8 @@ class LinhaLista(tk.Frame):
                          highlightbackground=tema["ui_borda"], highlightcolor=tema["ui_borda"])
         self.barra = tk.Frame(self, bg=self.cor_base, width=3)
         self.barra.grid(row=0, column=0, rowspan=2, sticky="ns")
-        self.img = tk.Label(self, image=nix_ui.icone(icone, "fraco"), bg=self.cor_base)
+        self.img = tk.Label(self, image=nix_ui.icone(icone, cor_icone or "fraco"),
+                            bg=self.cor_base)
         self.img.grid(row=0, column=1, rowspan=2, padx=(12 if cartao else 10, 12),
                       pady=12 if cartao else 9, sticky="n")
         linha_titulo = tk.Frame(self, bg=self.cor_base)
@@ -4278,7 +4281,8 @@ class LinhaLista(tk.Frame):
                                    font=(fonte_titulo or fonte, 10))
         self.lbl_titulo.pack(side="left")
         self.lbl_detalhe = tk.Label(self, text=detalhe, bg=self.cor_base,
-                                    fg=tema["ui_texto_fraco"], anchor="w", font=(fonte, 8))
+                                    fg=tema["ui_texto_fraco"], anchor="w", justify="left",
+                                    font=(fonte, 8))
         self.lbl_detalhe.grid(row=1, column=2, sticky="we", pady=(2, 11 if cartao else 8))
         self.lbl_direita = tk.Label(self, text=direita, bg=self.cor_base,
                                     fg=tema["ui_texto_fraco"], anchor="e", justify="right",
@@ -4311,9 +4315,8 @@ class LinhaLista(tk.Frame):
         if self.estilo == "cartao":
             self.configure(highlightbackground=t["ui_acento"] if self.selecionado
                            else (t["ui_texto_fraco"] if hover else t["ui_borda"]))
-        self.img.configure(image=nix_ui.icone(self.nome_icone,
-                                              "acento" if self.selecionado else
-                                              ("texto" if hover else "fraco")))
+        self.img.configure(image=nix_ui.icone(self.nome_icone, self.cor_icone or (
+            "acento" if self.selecionado else ("texto" if hover else "fraco"))))
 
     def marcar(self, sim):
         self.selecionado = sim
@@ -4917,8 +4920,29 @@ class TelaInicio(tk.Frame):
         BotaoIcone(self.barra_diagramas, t, "download", texto="Importar arquivo",
                    dica="Envia um .wasp.json deste computador pra esta cidade no servidor",
                    comando=self.importar).pack(side="left", padx=(6, 0))
-        self.lista_diagramas = ListaRolavel(self.direita, t, fundo=profundo)
-        self.lista_diagramas.pack(fill="both", expand=True, padx=(30, 18), pady=(0, 18))
+        self.bt_fonte_mapa = BotaoIcone(self.barra_diagramas, t, "map", texto="Satelite",
+                                        dica="Trocar entre mapa de ruas e satelite",
+                                        comando=self._trocar_fonte_mapa)
+        self.bt_fonte_mapa.pack(side="right")
+        BotaoIcone(self.barra_diagramas, t, "maximize-2", dica="Enquadrar todos no mapa",
+                   comando=lambda: self.mapa_cidade.enquadrar()).pack(side="right", padx=(0, 4))
+        # B0.44: o mapa da cidade com os equipamentos, e a lista ao lado
+        self.area = tk.Frame(self.direita, bg=profundo)
+        self.area.pack(fill="both", expand=True, padx=(30, 18), pady=(0, 18))
+        coluna = tk.Frame(self.area, bg=profundo, width=400)
+        coluna.pack(side="right", fill="y", padx=(14, 0))
+        coluna.pack_propagate(False)
+        self.lista_diagramas = ListaRolavel(coluna, t, fundo=profundo)
+        self.lista_diagramas.pack(fill="both", expand=True)
+        self._icones_mapa = {tipo: nix_ui.icone(nome, "branco", 14)
+                             for tipo, nome in ICONE_LOCAL.items()}
+        self.mapa_cidade = mapa.MapaWidget(
+            self.area, t, largura=500, altura=380, modo="ver",
+            ao_escolher=self._escolheu_no_mapa,
+            ao_abrir=lambda did: self.app.abrir_diagrama(self.cidade, did),
+            icones=self._icones_mapa.get, cores=COR_LOCAL)
+        self.mapa_cidade.pack(side="left", fill="both", expand=True)
+        self._mostrar_fonte_mapa()
 
         # mensagem no lugar da lista (sem cidades / sem conexao)
         self.aviso = tk.Frame(self.direita, bg=profundo)
@@ -5075,7 +5099,7 @@ class TelaInicio(tk.Frame):
             self.quadro_pendentes.pack_forget()
 
     def _mostrar_aviso(self, titulo, texto, botoes):
-        for parte in (self.cab_cidade, self.barra_diagramas, self.lista_diagramas):
+        for parte in (self.cab_cidade, self.barra_diagramas, self.area):
             parte.pack_forget()
         self.aviso_titulo.configure(text=titulo)
         self.aviso_texto.configure(text=texto)
@@ -5092,7 +5116,7 @@ class TelaInicio(tk.Frame):
         if not self.cab_cidade.winfo_ismapped():
             self.cab_cidade.pack(fill="x", padx=32, pady=(24, 4))
             self.barra_diagramas.pack(fill="x", padx=30, pady=(16, 10))
-            self.lista_diagramas.pack(fill="both", expand=True, padx=(30, 18), pady=(0, 18))
+            self.area.pack(fill="both", expand=True, padx=(30, 18), pady=(0, 18))
 
     def escolher_cidade(self, cidade, registrar=True):
         self.cidade = cidade
@@ -5148,7 +5172,7 @@ class TelaInicio(tk.Frame):
             caixa.pack(fill="x", pady=(4, 0))
             tk.Label(caixa, text="Nenhum diagrama nesta cidade ainda", bg=t["ui_painel"],
                      fg=t["ui_texto"], font=(self.app.fonte_titulo, 11)).pack(pady=(26, 4))
-            tk.Label(caixa, text="Crie o primeiro: o POP, uma caixa de emenda ou uma CTO.",
+            tk.Label(caixa, text="Crie o primeiro: o POP, uma CEO ou uma CTO.",
                      bg=t["ui_painel"], fg=t["ui_texto_fraco"],
                      font=(self.app.fonte_ui, 9)).pack(pady=(0, 14))
             nix_ui.BotaoIcone(caixa, t, "plus", texto="Novo diagrama", variante="acento",
@@ -5167,25 +5191,69 @@ class TelaInicio(tk.Frame):
                     partes.append("sem localizacao no mapa")
             if nuvem.pendente_de(self.cidade["id"], item["id"]):
                 partes.append("alteracoes deste PC aguardando envio")
-            direita = "alterado em %s" % _quando(item["modificado"])
+            quando = "alterado em %s" % _quando(item["modificado"])
             if item.get("alterado_por"):
-                direita += "\npor %s" % item["alterado_por"]
+                quando += " por %s" % item["alterado_por"]
             selo = (item["tipo"], COR_LOCAL[item["tipo"]]) if item["tipo"] in COR_LOCAL else None
             linha = LinhaLista(self.lista_diagramas.corpo, t,
                                ICONE_LOCAL.get(item["tipo"], "file-text"), item["titulo"],
-                               "   ·   ".join(partes), direita,
-                               ao_clicar=lambda i=item: self._escolher_diagrama(i),
+                               "  ·  ".join(partes) + "\n" + quando, "",
+                               ao_clicar=lambda i=item: self._escolher_diagrama(i, no_mapa=True),
                                ao_duplo=lambda i=item: self.app.abrir_diagrama(self.cidade, i["id"]),
                                fonte=self.app.fonte_ui, fonte_titulo=self.app.fonte_titulo,
-                               estilo="cartao", selo=selo)
+                               estilo="cartao", selo=selo,
+                               cor_icone=COR_ICONE_LOCAL.get(item["tipo"]))
             linha.pack(fill="x", pady=4)
             self.linhas_diagrama[item["id"]] = linha
         self.lista_diagramas.ligar_roda()
+        self._atualizar_mapa(itens)
 
-    def _escolher_diagrama(self, item):
+    # ---------------- mapa da cidade (B0.44) ----------------
+    def _atualizar_mapa(self, itens):
+        marcadores = [{"id": i["id"], "lat": i.get("lat"), "lon": i.get("lon"),
+                       "tipo": i["tipo"], "titulo": i["titulo"]} for i in itens]
+        self.mapa_cidade.definir_marcadores(marcadores)
+        if self.mapa_cidade.marcadores:
+            self.mapa_cidade.aviso = ""
+            return
+        self.mapa_cidade.aviso = ("Nenhum equipamento desta cidade tem localizacao ainda: abra o "
+                                  "diagrama e marque o local no mapa.") if itens else ""
+        self.mapa_cidade.redesenhar()
+        # sem nenhum ponto: centraliza na propria cidade (busca pelo nome)
+        cidade = self.cidade
+
+        def pronto(achados, erro):
+            if not erro and achados and self.cidade is cidade and not self.mapa_cidade.marcadores:
+                self.mapa_cidade.centralizar(achados[0][1], achados[0][2], 13)
+        em_segundo_plano(self, lambda: mapa.buscar_endereco(cidade["titulo"], 1), pronto)
+
+    def _escolheu_no_mapa(self, did):
+        item = next((i for i in self.itens if i["id"] == did), None)
+        if item:
+            self._escolher_diagrama(item)
+            linha = self.linhas_diagrama.get(did)
+            if linha is not None:
+                # rola a lista ate o cartao escolhido
+                self.lista_diagramas.update_idletasks()
+                total = max(1, self.lista_diagramas.corpo.winfo_height())
+                self.lista_diagramas.tela.yview_moveto(max(0, (linha.winfo_y() - 20) / total))
+
+    def _trocar_fonte_mapa(self):
+        nova = "satelite" if self.mapa_cidade.fonte == "mapa" else "mapa"
+        self.mapa_cidade.trocar_fonte(nova)
+        mapa.gravar_config({"fonte": nova})
+        self._mostrar_fonte_mapa()
+
+    def _mostrar_fonte_mapa(self):
+        # o botao diz pra onde vai
+        self.bt_fonte_mapa.configure(text="Satelite" if self.mapa_cidade.fonte == "mapa" else "Mapa")
+
+    def _escolher_diagrama(self, item, no_mapa=False):
         self.diagrama_escolhido = item["id"]
         for did, linha in self.linhas_diagrama.items():
             linha.marcar(did == item["id"])
+        if no_mapa:
+            self.mapa_cidade.escolher(item["id"], centralizar=True)
 
     def _enter(self, evento):
         if self.visivel() and self.conexao and evento.widget.winfo_toplevel() is self.app \
@@ -6837,10 +6905,10 @@ class App(tk.Tk):
             "aperte Enter. Tudo o que o programa faz esta ali.\n\n"
             "O botao ... no canto de cima tem o menu (abrir, salvar, exportar).\n\n"
             "INICIO (casinha no topo): as CIDADES e os DIAGRAMAS de cada uma. Cada "
-            "cidade e uma pasta; cada POP, caixa de emenda ou CTO e um diagrama dentro "
+            "cidade e uma pasta; cada POP, CEO ou CTO e um diagrama dentro "
             "dela. Use uma pasta compartilhada no servidor pra equipe toda.\n\n"
             "1. Na tela inicial (casinha), escolha a cidade e abra ou crie o diagrama "
-            "do POP, da caixa de emenda ou da CTO.\n\n"
+            "do POP, da CEO ou da CTO.\n\n"
             "2. O + da barra lateral cadastra um equipamento (DIO, CABO, acomodador, "
             "OLT, switch, RB); o icone ao lado cria "
             "varios de uma vez (DIO-01 ... DIO-24).\n\n"
@@ -6861,7 +6929,7 @@ class App(tk.Tk):
             "6. PENDENCIAS (F5): splitter sem entrada, duplex pela metade, nomes "
             "repetidos - e quantas portas ainda estao livres.\n\n"
             "7. LOCALIZACAO: o botao com o pino, no topo, diz de qual local e o "
-            "diagrama (POP, caixa de emenda ou CTO). Clique no mapa pra marcar, ou "
+            "diagrama (POP, CEO ou CTO). Clique no mapa pra marcar, ou "
             "cole a coordenada / o link do Google Maps. Dali abre no Google Maps "
             "e no Google Earth.\n\n"
             "Arraste o equipamento por qualquer parte pra move-lo; o botao de girar "

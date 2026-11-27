@@ -80,6 +80,14 @@ checar(novo["id"] == "cto-gonzaga-03" and novo["versao"], "cria diagrama", novo)
 novo2 = c.criar_diagrama("santos-sp", "CTO Gonzaga 03", r.to_dict())
 checar(novo2["id"] == "cto-gonzaga-03-2", "nome repetido ganha -2")
 lista = c.diagramas("santos-sp")
+r_coord = Rede()
+r_coord.definir_local({"tipo": "POP", "nome": "POP com ponto", "lat": -23.93, "lon": -46.33})
+c.criar_diagrama("santos-sp", "POP com ponto", r_coord.to_dict())
+pop = next(i for i in c.diagramas("santos-sp") if i["tipo"] == "POP")
+checar(pop["lat"] == -23.93 and pop["lon"] == -46.33 and pop["tem_coordenada"],
+       "lista de diagramas traz a coordenada (pro mapa da cidade)")
+lista = [i for i in c.diagramas("santos-sp") if i["tipo"] == "CTO"]
+checar("lat" not in lista[0], "sem coordenada: nao manda lat/lon")
 checar(len(lista) == 2 and lista[0]["tipo"] == "CTO" and lista[0]["equipamentos"] == 1
        and lista[0]["alterado_por"] == "Tulio R.", "lista diagramas com resumo", lista[0])
 aberto = c.abrir("santos-sp", "cto-gonzaga-03")
@@ -125,7 +133,7 @@ velho = c.abrir("santos-sp", "cto-gonzaga-03")["versao"]
 nuvem.enfileirar("santos-sp", "cto-gonzaga-03", r.to_dict(), "versao-velha", "CTO Gonzaga 03")
 res = nuvem.enviar_pendentes(c)
 checar(len(res["copias"]) == 1 and c.abrir("santos-sp", "cto-gonzaga-03")["versao"] == velho
-       and len(c.diagramas("santos-sp")) == 3,
+       and len(c.diagramas("santos-sp")) == 4,
        "conflito na fila: vira copia, nao apaga o trabalho de ninguem", res)
 print("== e-mail, dominio e criar conta (B0.41) ==")
 arm.definir_dominio("junior-telecom", "@JuniorTelecom.com.br")

@@ -34,7 +34,7 @@ import tkinter as tk
 AGENTE = "WaspFiber/B0.35 (diagramas FTTX; desktop)"
 
 # tipos de local que um diagrama pode ser
-TIPOS_LOCAL = (("POP", "POP"), ("CEO", "Caixa de emenda (CEO)"), ("CTO", "CTO"))
+TIPOS_LOCAL = (("POP", "POP"), ("CEO", "CEO"), ("CTO", "CTO"))
 ROTULO_TIPO_LOCAL = dict(TIPOS_LOCAL)
 
 ZOOM_MIN, ZOOM_MAX = 3, 19
@@ -427,7 +427,8 @@ class MapaWidget(tk.Canvas):
     TRABALHADORES = 8
 
     def __init__(self, pai, tema, largura=620, altura=440, ao_marcar=None,
-                 baixador=None, fonte=None, centro=None, zoom=None, **kw):
+                 baixador=None, fonte=None, centro=None, zoom=None, modo="marcar",
+                 ao_escolher=None, ao_abrir=None, icones=None, cores=None, **kw):
         self.tema = tema
         super().__init__(pai, width=largura, height=altura, bg=tema.get("fundo", "#1c1b19"),
                          highlightthickness=1, highlightbackground=tema.get("ui_borda", "#333"),
@@ -439,6 +440,15 @@ class MapaWidget(tk.Canvas):
         self.zoom = min(self.zoom, self.zoom_max())    # satelite vai so ate o 18
         self.marcador = None                  # (lat, lon)
         self.ao_marcar = ao_marcar
+        # B0.44 - modo "ver": mapa da cidade com varios equipamentos (POP/CEO/CTO);
+        # clique escolhe, duplo clique abre. modo "marcar": clique marca o ponto.
+        self.modo = modo
+        self.ao_escolher, self.ao_abrir = ao_escolher, ao_abrir
+        self.icones = icones or (lambda tipo: None)     # tipo -> PhotoImage branca
+        self.cores = cores or {}                        # tipo -> cor do pino
+        self.marcadores = []                  # [{id, lat, lon, tipo, titulo}]
+        self.escolhido = None
+        self._sobre = None
         self.baixador = baixador or baixar_tile
         self.aviso = ""                       # faixa de aviso no alto do mapa
         self._imagens = {}                    # (fonte, z, x, y) -> PhotoImage
@@ -461,6 +471,8 @@ class MapaWidget(tk.Canvas):
         self.bind("<ButtonPress-1>", self._press)
         self.bind("<B1-Motion>", self._motion)
         self.bind("<ButtonRelease-1>", self._release)
+        self.bind("<Double-Button-1>", self._duplo)
+        self.bind("<Motion>", self._mover)
         self.bind("<MouseWheel>", self._roda)
         self.bind("<Button-4>", lambda e: self.aplicar_zoom(+1, (e.x, e.y)))
         self.bind("<Button-5>", lambda e: self.aplicar_zoom(-1, (e.x, e.y)))
@@ -637,9 +649,111 @@ class MapaWidget(tk.Canvas):
 
     def _release(self, evento):
         if self._inicio_arraste and not self._arrastou:
-            lat, lon = self.ponto_da_tela(evento.x, evento.y)
-            self.marcar(round(lat, 7), round(lon, 7), avisar=True)
+            if self.modo == "ver":
+                achado = self.marcador_em(evento.x, evento.y)
+                if achado:
+                    self.escolher(achado["id"], avisar=True)
+            else:
+                lat, lon = self.ponto_da_tela(evento.x, evento.y)
+                self.marcar(round(lat, 7), round(lon, 7), avisar=True)
         self._inicio_arraste = None
+
+    # ---------------- varios equipamentos (B0.44) ----------------
+    def definir_marcadores(self, marcadores, enquadrar=True):
+        """marcadores: [{id, lat, lon, tipo, titulo}] (sem coordenada ficam de fora)."""
+        self.marcadores = [m for m in marcadores
+                           if m.get("lat") is not None and m.get("lon") is not None]
+        if self.escolhido not in [m["id"] for m in self.marcadores]:
+            self.escolhido = None
+        if enquadrar:
+            self.enquadrar()
+        self.redesenhar()
+
+    def enquadrar(self, margem=90):
+        """Zoom e centro pra caber todos os equipamentos na tela."""
+        if not self.marcadores:
+            return False
+        w, h = self._tamanho()
+        if len(self.marcadores) == 1:
+            m = self.marcadores[0]
+            self.centralizar(m["lat"], m["lon"], min(17, self.zoom_max()))
+            return True
+        lats = [m["lat"] for m in self.marcadores]
+        lons = [m["lon"] for m in self.marcadores]
+        for z in range(min(17, self.zoom_max()), ZOOM_MIN - 1, -1):
+            x1, y1 = latlon_para_pixel(max(lats), min(lons), z)
+            x2, y2 = latlon_para_pixel(min(lats), max(lons), z)
+            if x2 - x1 <= max(80, w - 2 * margem) and y2 - y1 <= max(80, h - 2 * margem):
+                break
+        lat, lon = pixel_para_latlon((x1 + x2) / 2.0, (y1 + y2) / 2.0 - 12, z)
+        self.centralizar(lat, lon, z)
+        return True
+
+    def escolher(self, marcador_id, centralizar=False, avisar=False):
+        self.escolhido = marcador_id
+        m = next((m for m in self.marcadores if m["id"] == marcador_id), None)
+        if m and centralizar:
+            w, h = self._tamanho()
+            x, y = self.tela_do_ponto(m["lat"], m["lon"])
+            if not (60 < x < w - 60 and 60 < y < h - 30):
+                self.lat, self.lon = m["lat"], m["lon"]
+        self.redesenhar()
+        if avisar and self.ao_escolher:
+            self.ao_escolher(marcador_id)
+
+    def marcador_em(self, x, y):
+        """O equipamento cujo pino esta debaixo do mouse (ou None)."""
+        melhor, dist = None, 15.0 ** 2
+        for m in self.marcadores:
+            mx, my = self.tela_do_ponto(m["lat"], m["lon"])
+            d = (mx - x) ** 2 + (my - 22 - y) ** 2       # cabeca do pino
+            if d <= dist:
+                melhor, dist = m, d
+        return melhor
+
+    def _duplo(self, evento):
+        if self.modo == "ver" and self.ao_abrir:
+            achado = self.marcador_em(evento.x, evento.y)
+            if achado:
+                self.ao_abrir(achado["id"])
+
+    def _mover(self, evento):
+        if self.modo != "ver" or self._inicio_arraste:
+            return
+        achado = self.marcador_em(evento.x, evento.y)
+        novo = achado["id"] if achado else None
+        if novo != self._sobre:
+            self._sobre = novo
+            self.configure(cursor="hand2" if novo else "fleur")
+            self.redesenhar()
+
+    def _desenhar_marcador(self, m, w, h):
+        x, y = self.tela_do_ponto(m["lat"], m["lon"])
+        if x < -60 or x > w + 60 or y < -20 or y > h + 60:
+            return
+        t = self.tema
+        destaque = m["id"] == self.escolhido
+        cor = self.cores.get(m.get("tipo"), t.get("ui_texto_fraco", "#8b98a4"))
+        r = 14 if destaque else 12
+        cy = y - 22
+        self.create_oval(x - 6, y - 2, x + 6, y + 3, fill="#000000", outline="", stipple="gray50")
+        if destaque:
+            self.create_oval(x - r - 5, cy - r - 5, x + r + 5, cy + r + 5,
+                             outline=t.get("ui_acento", "#4dd0e1"), width=3)
+        self.create_polygon(x, y, x - 8, cy + 6, x + 8, cy + 6, fill=cor, outline="#ffffff",
+                            width=1.5)
+        self.create_oval(x - r, cy - r, x + r, cy + r, fill=cor, outline="#ffffff", width=2)
+        imagem = self.icones(m.get("tipo"))
+        if imagem is not None:
+            self.create_image(x, cy, image=imagem)
+        if destaque or m["id"] == self._sobre or self.zoom >= 16:
+            texto = self.create_text(x + r + 8, cy, text=m.get("titulo", ""), anchor="w",
+                                     fill="#ffffff", font=("TkDefaultFont", 8, "bold"))
+            caixa = self.bbox(texto)
+            if caixa:
+                fundo = self.create_rectangle(caixa[0] - 5, caixa[1] - 2, caixa[2] + 5,
+                                              caixa[3] + 2, fill="#0b0f14", outline=cor)
+                self.tag_raise(texto, fundo)
 
     def ponto_da_tela(self, x, y):
         w, h = self._tamanho()
@@ -697,11 +811,17 @@ class MapaWidget(tk.Canvas):
         # baixa primeiro o que esta no meio da tela
         self._pedir_tiles([c for _, c in sorted(faltando)])
 
+        if self.modo == "ver":
+            # os equipamentos da cidade; o escolhido por cima de todos
+            for m in sorted(self.marcadores, key=lambda m: (m["id"] == self.escolhido,
+                                                             m["id"] == self._sobre)):
+                self._desenhar_marcador(m, w, h)
         if self.marcador:
             self._desenhar_pino(*self.tela_do_ponto(*self.marcador))
-        # mira no centro, discreta
-        self.create_line(w / 2 - 6, h / 2, w / 2 + 6, h / 2, fill="#ffffff", width=1)
-        self.create_line(w / 2, h / 2 - 6, w / 2, h / 2 + 6, fill="#ffffff", width=1)
+        if self.modo != "ver":
+            # mira no centro, discreta
+            self.create_line(w / 2 - 6, h / 2, w / 2 + 6, h / 2, fill="#ffffff", width=1)
+            self.create_line(w / 2, h / 2 - 6, w / 2, h / 2 + 6, fill="#ffffff", width=1)
 
         credito = FONTES[self.fonte]["credito"]
         fundo = self.create_text(w - 6, h - 5, text=credito, anchor="se", fill="#202020",
@@ -715,7 +835,8 @@ class MapaWidget(tk.Canvas):
                          font=("TkDefaultFont", 8))
         texto_aviso = self.aviso
         if not texto_aviso and falhou_na_tela and self.erro_rede:
-            texto_aviso = ("Sem conexao com o servidor do mapa. A coordenada pode ser "
+            texto_aviso = ("Sem conexao com o servidor do mapa." if self.modo == "ver" else
+                           "Sem conexao com o servidor do mapa. A coordenada pode ser "
                            "digitada ou colada ao lado.")
         if texto_aviso:
             self.create_rectangle(0, 0, w, 26, fill=t.get("ui_painel", "#222"), outline="")
