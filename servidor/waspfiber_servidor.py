@@ -25,6 +25,7 @@ Uso:
 
 API (JSON; depois do login: cabecalho  Authorization: Bearer <token>):
     GET  /api/saude
+    GET  /api/empresas                       (publico: nome e dominio de e-mail)
     POST /api/entrar                         {empresa, usuario, senha}
     POST /api/sair
     GET  /api/cidades
@@ -51,7 +52,7 @@ import unicodedata
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSAO_SERVIDOR = "B0.41"
+VERSAO_SERVIDOR = "B0.42"
 EXTENSAO = ".wasp.json"
 MAX_CORPO = 25 * 1024 * 1024
 DIAS_SESSAO = 30
@@ -563,6 +564,13 @@ class Manipulador(BaseHTTPRequestHandler):
                     return self._responder(200, a.entrar_email(d.get("email"), d.get("senha")))
                 return self._responder(200, a.entrar(d.get("empresa"), d.get("usuario"),
                                                      d.get("senha")))
+            if rota == ["empresas"] and metodo == "GET":
+                # tela de login (B0.42): escolher a empresa e o e-mail ja vem com o
+                # dominio dela. So nome e dominios - nada de usuarios ou dados.
+                return self._responder(200, {"empresas": [
+                    {"id": eid, "nome": dados.get("nome", eid), "dominios": dados["dominios"]}
+                    for eid, dados in sorted(a._empresas(), key=lambda e: slug(e[1].get("nome", "")))
+                    if dados.get("dominios")]})
             if rota == ["empresa-do-email"] and metodo == "GET":
                 consulta = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                 eid, dados = a.empresa_do_email((consulta.get("email") or [""])[0])

@@ -137,6 +137,9 @@ except ValueError:
 checar(nuvem.Conexao.empresa_do_email("x@juniortelecom.com.br", url) == "Junior Telecom LTDA",
        "empresa pelo dominio do e-mail")
 checar(nuvem.Conexao.empresa_do_email("x@gmail.com", url) is None, "dominio sem empresa: None")
+emps = nuvem.Conexao.empresas(url)
+checar(emps == [{"id": "junior-telecom", "nome": "Junior Telecom LTDA", "dominios": ["juniortelecom.com.br"]}],
+       "lista publica de empresas: so as com dominio, so nome e dominio", emps)
 e = erro_de(lambda: nuvem.Conexao.criar_conta("Zé", "ze@gmail.com", "senha-do-ze-1", url))
 checar(e and e.status == 400 and "dominio" in str(e), "criar conta com dominio de fora: recusa")
 r = nuvem.Conexao.criar_conta("Zé Técnico", "Ze@JuniorTelecom.com.br", "senha-do-ze-1", url)

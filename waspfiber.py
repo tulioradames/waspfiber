@@ -31,7 +31,7 @@ import waspfiber_mapa as mapa   # localizacao do diagrama (B0.34)
 import waspfiber_nuvem as nuvem   # servidor: login, cidades e diagramas (B0.39)
 
 APP_NOME = "WaspFiber"
-VERSAO = "B0.41"
+VERSAO = "B0.42"
 EXTENSAO = ".wasp.json"
 EXTENSAO_NIX = ".nix.json"      # redes salvas quando o programa se chamava Nix
 
@@ -4422,21 +4422,25 @@ class DialogNovaCidade(DialogoBase):
 
 
 class PainelAcesso(tk.Frame):
-    """Entrar no WaspFiber (B0.41): e-mail e senha - o servidor e fixo e a
-    EMPRESA SAI DO DOMINIO do e-mail (aparece sozinha, sem campo pra errar).
-    Tambem 'Criar conta': so com e-mail do dominio da empresa; a conta fica
-    aguardando o administrador da empresa aprovar.
+    """Entrar no WaspFiber / Criar conta (B0.42): a pessoa ESCOLHE A EMPRESA
+    numa lista e o e-mail ja vem com o dominio dela (ex.: Zaaz NE ->
+    @zaaztelecom.com.br); so digita a parte antes do @. O servidor e fixo.
+    'Criar conta' so aceita o dominio da empresa e fica aguardando o
+    administrador aprovar.
 
     modo_unico=True: so o 'Entrar' (sessao vencida no meio do trabalho)."""
+
+    ESCOLHA = "Escolha a sua empresa"
 
     def __init__(self, pai, tema, fonte, fonte_titulo, ao_entrar, modo_unico=False):
         super().__init__(pai, bg=pai.cget("bg"))
         self.tema, self.fonte, self.fonte_titulo = tema, fonte, fonte_titulo
         self.ao_entrar, self.modo_unico = ao_entrar, modo_unico
         self.modo = "entrar"
-        self._consulta = None            # after() da busca da empresa
-        self._email_consultado = None
+        self.empresas = None             # [{id, nome, dominios}] vindas do servidor
+        self.empresa = None              # a escolhida
         self.campos = {}
+        self._carregando = False
         fundo = self.cget("bg")
         self.lbl_titulo = tk.Label(self, text="", bg=fundo, fg=tema["ui_texto"],
                                    font=(fonte_titulo, 14))
@@ -4464,12 +4468,15 @@ class PainelAcesso(tk.Frame):
         self.link_troca.pack(side="left", padx=(4, 0))
         self.link_troca.bind("<ButtonRelease-1>", lambda _e: self.trocar_modo())
         self.montar("entrar")
+        self.carregar_empresas()
 
     # ---------------- montagem ----------------
-    def _campo(self, chave, rotulo, valor="", oculto=False):
-        t = self.tema
-        tk.Label(self.corpo, text=rotulo, bg=self.cget("bg"), fg=t["ui_texto_fraco"],
+    def _rotulo(self, texto):
+        tk.Label(self.corpo, text=texto, bg=self.cget("bg"), fg=self.tema["ui_texto_fraco"],
                  font=(self.fonte, 8)).pack(anchor="w", pady=(8, 2))
+
+    def _campo(self, chave, rotulo, valor="", oculto=False):
+        self._rotulo(rotulo)
         entrada = ttk.Entry(self.corpo, width=38, show="•" if oculto else "")
         entrada.insert(0, valor)
         entrada.pack(fill="x")
@@ -4477,52 +4484,73 @@ class PainelAcesso(tk.Frame):
         self.campos[chave] = entrada
         return entrada
 
-    def montar(self, modo):
+    def _campo_empresa(self):
+        self._rotulo("Empresa")
+        self.var_empresa = tk.StringVar(value="")
+        caixa = ttk.Combobox(self.corpo, textvariable=self.var_empresa, state="readonly",
+                             width=36)
+        caixa.pack(fill="x")
+        caixa.bind("<<ComboboxSelected>>", lambda _e: self._escolheu_empresa())
+        self.campos["empresa"] = caixa
+
+    def _campo_email(self, rotulo):
+        """[ parte antes do @ ][ @dominio-da-empresa ] - o dominio nao se digita."""
         t = self.tema
+        self._rotulo(rotulo)
+        linha = tk.Frame(self.corpo, bg=t["ui_borda"])
+        linha.pack(fill="x")
+        dentro = tk.Frame(linha, bg=t["ui_campo"])
+        dentro.pack(fill="x", padx=1, pady=1)
+        entrada = tk.Entry(dentro, bd=0, relief="flat", bg=t["ui_campo"], fg=t["ui_texto"],
+                           insertbackground=t["ui_texto"], highlightthickness=0,
+                           font=(self.fonte, 9), width=18)
+        entrada.pack(side="left", fill="x", expand=True, padx=(6, 0), ipady=4)
+        entrada.bind("<Return>", lambda _e: (self.enviar(), "break")[1])
+        entrada.bind("<KeyRelease>", lambda _e: self._colou_email_inteiro(), add="+")
+        self.var_dominio = tk.StringVar(value="")
+        self.lbl_dominio = tk.Label(dentro, textvariable=self.var_dominio, bg=t["ui_campo"],
+                                    fg=t["ui_acento"], font=(self.fonte, 9), padx=6)
+        self.lbl_dominio.pack(side="right")
+        self.cb_dominio = ttk.Combobox(dentro, textvariable=self.var_dominio, state="readonly",
+                                       width=22)
+        self.campos["email"] = entrada
+
+    def montar(self, modo):
         self.modo = modo
-        email_antes = self.campos["email"].get() if "email" in self.campos else \
-            nuvem.ler_sessao().get("email", "")
+        local = self.campos["email"].get() if "email" in self.campos else ""
         for filho in self.corpo.winfo_children():
             filho.destroy()
         self.campos = {}
-        self._email_consultado = None
         if modo == "entrar":
             self.lbl_titulo.configure(text="Entrar no WaspFiber")
-            self.lbl_sub.configure(text="Use o e-mail da sua empresa.")
-            self._campo("email", "E-mail", email_antes)
-            self._linha_empresa()
+            self.lbl_sub.configure(text="Escolha a sua empresa e entre com o seu e-mail.")
+            self._campo_empresa()
+            self._campo_email("E-mail")
             self._campo("senha", "Senha", oculto=True)
             self.botao.configure(text="Entrar")
             self.lbl_troca.configure(text="Ainda nao tem conta?")
             self.link_troca.configure(text="Criar conta")
         else:
             self.lbl_titulo.configure(text="Criar conta")
-            self.lbl_sub.configure(text="Com o e-mail da sua empresa (ex.: voce@suaempresa.com.br).")
+            self.lbl_sub.configure(text="Com o e-mail da sua empresa.")
+            self._campo_empresa()
             self._campo("nome", "Seu nome")
-            self._campo("email", "E-mail da empresa", email_antes)
-            self._linha_empresa()
+            self._campo_email("E-mail da empresa")
             self._campo("senha", "Senha (pelo menos 8 caracteres)", oculto=True)
             self._campo("senha2", "Repita a senha", oculto=True)
             self.botao.configure(text="Criar conta")
             self.lbl_troca.configure(text="Ja tem conta?")
             self.link_troca.configure(text="Entrar")
-        self.campos["email"].bind("<KeyRelease>", lambda _e: self._agendar_empresa(), add="+")
-        self.campos["email"].bind("<FocusOut>", lambda _e: self._agendar_empresa(0), add="+")
+        self.campos["email"].insert(0, local)
+        self._preencher_lista()
         self.mostrar_msg("")
-        self._agendar_empresa(0)
-        self.foco = next((e for e in self.campos.values() if not e.get()), self.campos["senha"])
 
-    def _linha_empresa(self):
-        """'Empresa: Zaaz NE' - preenchida sozinha pelo dominio do e-mail."""
-        fundo = self.cget("bg")
-        linha = tk.Frame(self.corpo, bg=fundo)
-        linha.pack(fill="x", pady=(6, 0))
-        self.img_empresa = tk.Label(linha, image=nix_ui.icone("building-2", "fraco"), bg=fundo)
-        self.img_empresa.pack(side="left")
-        self.lbl_empresa = tk.Label(linha, text="", bg=fundo, fg=self.tema["ui_texto_fraco"],
-                                    font=(self.fonte, 9))
-        self.lbl_empresa.pack(side="left", padx=(6, 0))
-        self.empresa_nome = None
+    @property
+    def foco(self):
+        for chave in ("nome", "email", "senha"):
+            if chave in self.campos and not self.campos[chave].get():
+                return self.campos[chave]
+        return self.campos["senha"]
 
     def trocar_modo(self):
         self.montar("criar" if self.modo == "entrar" else "entrar")
@@ -4533,46 +4561,112 @@ class PainelAcesso(tk.Frame):
                "info": self.tema["ui_texto_fraco"]}[tipo]
         self.msg.configure(text=texto, fg=cor)
 
-    # ---------------- empresa pelo dominio ----------------
-    def _agendar_empresa(self, atraso=450):
-        if self._consulta:
-            self.after_cancel(self._consulta)
-        self._consulta = self.after(atraso, self._buscar_empresa)
+    # ---------------- empresas ----------------
+    def carregar_empresas(self):
+        if self._carregando:
+            return
+        self._carregando = True
+        self.campos["empresa"].configure(values=())
+        self.var_empresa.set("Carregando as empresas...")
 
-    def _buscar_empresa(self):
-        self._consulta = None
-        if "email" not in self.campos:
-            return
-        email = self.campos["email"].get().strip().lower()
-        if email == self._email_consultado:
-            return
-        self._email_consultado = email
-        t = self.tema
-        if "@" not in email or "." not in email.rsplit("@", 1)[1]:
-            self.empresa_nome = None
-            self.lbl_empresa.configure(text="A empresa aparece aqui pelo e-mail", fg=t["ui_texto_fraco"])
-            self.img_empresa.configure(image=nix_ui.icone("building-2", "fraco"))
-            return
-        self.lbl_empresa.configure(text="Procurando a empresa...", fg=t["ui_texto_fraco"])
-
-        def pronto(nome, erro):
-            if self.campos.get("email") is None or \
-                    self.campos["email"].get().strip().lower() != email:
-                return
+        def pronto(lista, erro):
+            self._carregando = False
             if erro:
-                self.empresa_nome = None
-                self.lbl_empresa.configure(text="Sem conexao com o WaspFiber", fg=t["ui_aviso"])
-                self._email_consultado = None
-            elif nome:
-                self.empresa_nome = nome
-                self.lbl_empresa.configure(text="Empresa: %s" % nome, fg=t["ui_texto"])
-                self.img_empresa.configure(image=nix_ui.icone("building-2", "acento"))
-            else:
-                self.empresa_nome = None
-                self.lbl_empresa.configure(text="@%s nao e de nenhuma empresa cadastrada"
-                                                % email.rsplit("@", 1)[1], fg=t["ui_aviso"])
-                self.img_empresa.configure(image=nix_ui.icone("building-2", "aviso"))
-        em_segundo_plano(self, lambda: nuvem.Conexao.empresa_do_email(email), pronto)
+                self.empresas = None
+                self.var_empresa.set("")
+                self.mostrar_msg("Sem conexao com o WaspFiber. Confira a internet e tente "
+                                 "de novo (clique em %s)." % self.botao.cget("text"))
+                return
+            self.empresas = lista or []
+            if self.msg.cget("text").startswith("Sem conexao"):
+                self.mostrar_msg("")
+            self._preencher_lista()
+        em_segundo_plano(self, lambda: nuvem.Conexao.empresas(), pronto)
+
+    def _preencher_lista(self):
+        if self.empresas is None:
+            self.var_empresa.set("Carregando as empresas..." if self._carregando else "")
+            self._mostrar_dominio()
+            return
+        self.campos["empresa"].configure(values=[e["nome"] for e in self.empresas])
+        if self.empresa is None:
+            # ultima empresa usada (pelo e-mail lembrado) - ou a unica que existe
+            lembrado = (nuvem.ler_sessao().get("email") or "").lower()
+            dominio = lembrado.rsplit("@", 1)[1] if "@" in lembrado else ""
+            self.empresa = next((e for e in self.empresas if dominio in e["dominios"]), None)
+            if self.empresa is None and len(self.empresas) == 1:
+                self.empresa = self.empresas[0]
+            if self.empresa and lembrado and not self.campos["email"].get():
+                self.campos["email"].insert(0, lembrado.rsplit("@", 1)[0])
+        self.var_empresa.set(self.empresa["nome"] if self.empresa else self.ESCOLHA)
+        self._mostrar_dominio()
+
+    def _escolheu_empresa(self):
+        nome = self.var_empresa.get()
+        self.empresa = next((e for e in self.empresas or [] if e["nome"] == nome), None)
+        self._mostrar_dominio()
+        self.mostrar_msg("")
+        self.campos["email"].focus_set()
+
+    def _mostrar_dominio(self):
+        """O '@dominio' preso no fim do campo de e-mail (lista, se a empresa
+        tiver mais de um)."""
+        dominios = (self.empresa or {}).get("dominios") or []
+        self.cb_dominio.pack_forget()
+        self.lbl_dominio.pack_forget()
+        if len(dominios) > 1:
+            self.cb_dominio.configure(values=["@" + d for d in dominios])
+            if self.var_dominio.get() not in self.cb_dominio.cget("values"):
+                self.var_dominio.set("@" + dominios[0])
+            self.cb_dominio.pack(side="right", padx=(0, 1))
+        else:
+            self.var_dominio.set(("@" + dominios[0]) if dominios else "@ ...")
+            self.lbl_dominio.configure(fg=self.tema["ui_acento"] if dominios
+                                       else self.tema["ui_texto_fraco"])
+            self.lbl_dominio.pack(side="right")
+
+    def _colou_email_inteiro(self):
+        """Se a pessoa colar o e-mail inteiro, escolhe a empresa pelo dominio
+        e deixa so a parte antes do @."""
+        texto = self.campos["email"].get()
+        if "@" in texto and self.empresas:
+            local, dominio = texto.rsplit("@", 1)
+            achada = next((e for e in self.empresas if dominio.strip().lower() in e["dominios"]),
+                          None)
+            if achada:
+                self.empresa = achada
+                self.var_empresa.set(achada["nome"])
+                self.var_dominio.set("@" + dominio.strip().lower())
+                self._mostrar_dominio()
+                self.campos["email"].delete(0, "end")
+                self.campos["email"].insert(0, local)
+
+    def preencher(self, email):
+        """Escolhe a empresa pelo dominio e preenche a parte antes do @."""
+        self.campos["email"].delete(0, "end")
+        self.campos["email"].insert(0, email)
+        self._colou_email_inteiro()
+
+    def email_completo(self):
+        """O e-mail montado (parte digitada + @dominio da empresa), ou None."""
+        local = self.campos["email"].get().strip().lower()
+        if not self.empresa or not local or "@" in local or " " in local:
+            return None
+        return "%s%s" % (local, self.var_dominio.get())
+
+    def _conferir(self):
+        if self.empresas is None:
+            self.carregar_empresas()
+            self.mostrar_msg("Buscando as empresas no WaspFiber...", "info")
+            return None
+        if not self.empresa:
+            self.mostrar_msg("Escolha a sua empresa.")
+            return None
+        email = self.email_completo()
+        if not email:
+            self.mostrar_msg("Digite o seu e-mail (so a parte antes do @).")
+            return None
+        return email
 
     # ---------------- enviar ----------------
     def enviar(self):
@@ -4582,10 +4676,12 @@ class PainelAcesso(tk.Frame):
             self._criar()
 
     def _entrar(self):
-        email = self.campos["email"].get().strip()
+        email = self._conferir()
+        if not email:
+            return
         senha = self.campos["senha"].get()
-        if not email or not senha:
-            self.mostrar_msg("Digite o e-mail e a senha.")
+        if not senha:
+            self.mostrar_msg("Digite a senha.")
             return
         self.mostrar_msg("Entrando...", "info")
         self.update_idletasks()
@@ -4600,21 +4696,25 @@ class PainelAcesso(tk.Frame):
         self.ao_entrar(conexao)
 
     def _criar(self):
-        c = {k: e.get() for k, e in self.campos.items()}
-        if not c["nome"].strip() or not c["email"].strip() or not c["senha"]:
-            self.mostrar_msg("Preencha nome, e-mail e senha.")
+        email = self._conferir()
+        if not email:
             return
-        if c["senha"] != c["senha2"]:
+        nome = self.campos["nome"].get().strip()
+        senha, senha2 = self.campos["senha"].get(), self.campos["senha2"].get()
+        if not nome or not senha:
+            self.mostrar_msg("Preencha o nome e a senha.")
+            return
+        if senha != senha2:
             self.mostrar_msg("As duas senhas nao conferem.")
             self.campos["senha2"].delete(0, "end")
             return
-        if len(c["senha"]) < 8:
+        if len(senha) < 8:
             self.mostrar_msg("A senha precisa ter pelo menos 8 caracteres.")
             return
         self.mostrar_msg("Enviando o pedido...", "info")
         self.update_idletasks()
         try:
-            r = nuvem.Conexao.criar_conta(c["nome"].strip(), c["email"].strip(), c["senha"])
+            r = nuvem.Conexao.criar_conta(nome, email, senha)
         except nuvem.ErroServidor as falha:
             self.mostrar_msg(str(falha))
             return

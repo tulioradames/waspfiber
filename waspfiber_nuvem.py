@@ -186,6 +186,11 @@ class Conexao:
             raise
 
     @classmethod
+    def empresas(cls, url=None):
+        """[{id, nome, dominios}] - as empresas pra escolher no login."""
+        return cls(url or SERVIDOR_PADRAO).pedir("GET", "/api/empresas")["empresas"]
+
+    @classmethod
     def criar_conta(cls, nome, email, senha, url=None):
         return cls(url or SERVIDOR_PADRAO).pedir(
             "POST", "/api/contas", {"nome": nome, "email": email, "senha": senha})

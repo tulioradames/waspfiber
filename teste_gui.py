@@ -49,6 +49,9 @@ threading.Thread(target=srv.serve_forever, daemon=True).start()
 URL_SRV = "http://127.0.0.1:%d" % srv.server_address[1]
 srv.RequestHandlerClass.armazem.criar_empresa("junior", "Junior Telecom")
 srv.RequestHandlerClass.armazem.definir_dominio("junior", "junior.com.br")
+srv.RequestHandlerClass.armazem.criar_empresa("beta", "Beta Fibra")
+srv.RequestHandlerClass.armazem.definir_dominio("beta", "betafibra.com.br")
+srv.RequestHandlerClass.armazem.definir_dominio("beta", "beta.net")
 srv.RequestHandlerClass.armazem.definir_usuario("junior", "tulio@junior.com.br", "Tulio",
                                                 "senha-teste-123", "admin")
 srv.RequestHandlerClass.armazem.definir_usuario("junior", "ana@junior.com.br", "Ana",
@@ -626,31 +629,42 @@ checar(tela.visivel() and tela.login.winfo_ismapped(), "sem login: mostra o logi
 form = tela.form
 
 
-def esperar_empresa(texto_esperado, limite=4.0):
+def esperar_empresas(limite=5.0):
     fim = __import__("time").time() + limite
     while __import__("time").time() < fim:
         app.update()
-        if texto_esperado in form.lbl_empresa.cget("text"):
+        if form.empresas is not None:
             return True
         __import__("time").sleep(0.03)
     return False
 
 
-checar(form.modo == "entrar" and set(form.campos) == {"email", "senha"}
+checar(form.modo == "entrar" and set(form.campos) == {"empresa", "email", "senha"}
        and "Entrar no WaspFiber" in form.lbl_titulo.cget("text"),
-       "tela 'Entrar no WaspFiber' so com e-mail e senha (sem servidor, sem empresa)")
+       "tela 'Entrar no WaspFiber': empresa, e-mail e senha (sem servidor)")
+checar(esperar_empresas(), "carrega a lista de empresas do servidor")
+nomes = list(form.campos["empresa"].cget("values"))
+checar(nomes == ["Beta Fibra", "Junior Telecom"], "lista so as empresas com dominio", nomes)
+checar(form.empresa is None and form.var_empresa.get() == form.ESCOLHA,
+       "mais de uma empresa: pede pra escolher")
+form.var_empresa.set("Junior Telecom")
+form._escolheu_empresa()
+app.update()
+checar(form.var_dominio.get() == "@junior.com.br" and form.lbl_dominio.winfo_ismapped(),
+       "escolheu a empresa: o e-mail ja vem com @junior.com.br", form.var_dominio.get())
+form.var_empresa.set("Beta Fibra")
+form._escolheu_empresa()
+app.update()
+checar(form.cb_dominio.winfo_ismapped() and list(form.cb_dominio.cget("values")) ==
+       ["@beta.net", "@betafibra.com.br"], "empresa com 2 dominios: escolhe o dominio na lista")
+form.preencher("tulio@junior.com.br")
+checar(form.empresa["nome"] == "Junior Telecom" and form.campos["email"].get() == "tulio"
+       and form.email_completo() == "tulio@junior.com.br",
+       "colar o e-mail inteiro escolhe a empresa e deixa so a parte antes do @")
 form.campos["email"].delete(0, "end")
-form.campos["email"].insert(0, "tulio@junior.com.br")
-form._agendar_empresa(0)
-checar(esperar_empresa("Junior Telecom"), "empresa aparece sozinha pelo dominio do e-mail",
-       form.lbl_empresa.cget("text"))
-form.campos["email"].delete(0, "end")
-form.campos["email"].insert(0, "tulio@gmail.com")
-form._agendar_empresa(0)
-checar(esperar_empresa("nao e de nenhuma empresa"), "dominio desconhecido: avisa",
-       form.lbl_empresa.cget("text"))
-form.campos["email"].delete(0, "end")
-form.campos["email"].insert(0, "tulio@junior.com.br")
+form.enviar()
+checar("antes do @" in form.msg.cget("text"), "sem e-mail: avisa", form.msg.cget("text"))
+form.campos["email"].insert(0, "tulio")
 form.campos["senha"].insert(0, "errada")
 form.enviar()
 app.update()
@@ -777,20 +791,17 @@ tela.sair()
 app.update()
 checar(app.conexao is None and tela.login.winfo_ismapped() and "token" not in nuvem.ler_sessao(),
        "sair volta pro login e esquece a sessao")
+app.update()
+checar(form.empresa and form.empresa["nome"] == "Junior Telecom" and form.campos["email"].get() == "tulio",
+       "proximo login: empresa e e-mail ja vem preenchidos")
 form.trocar_modo()
-checar(form.modo == "criar" and set(form.campos) == {"nome", "email", "senha", "senha2"},
-       "criar conta: nome, e-mail e senha (2x)")
-for k, v in (("nome", "Bruno"), ("email", "bruno@gmail.com"), ("senha", "senha-bruno-1"),
-             ("senha2", "senha-bruno-1")):
+checar(form.modo == "criar" and set(form.campos) == {"empresa", "nome", "email", "senha", "senha2"}
+       and form.var_dominio.get() == "@junior.com.br",
+       "criar conta: empresa, nome, e-mail (com o dominio) e senha 2x")
+for k, v in (("nome", "Bruno"), ("email", "bruno"), ("senha", "senha-bruno-1"),
+             ("senha2", "outra-coisa")):
     form.campos[k].delete(0, "end")
     form.campos[k].insert(0, v)
-form.enviar()
-checar("nao e de nenhuma empresa" in form.msg.cget("text"), "so aceita e-mail do dominio da empresa",
-       form.msg.cget("text"))
-form.campos["email"].delete(0, "end")
-form.campos["email"].insert(0, "bruno@junior.com.br")
-form.campos["senha2"].delete(0, "end")
-form.campos["senha2"].insert(0, "outra-coisa")
 form.enviar()
 checar("nao conferem" in form.msg.cget("text"), "senhas diferentes: avisa")
 form.campos["senha2"].insert(0, "senha-bruno-1")
@@ -800,14 +811,14 @@ checar(form.modo == "entrar" and "Pedido enviado" in form.msg.cget("text")
        and "Junior Telecom" in form.msg.cget("text"), "pedido enviado e volta pro Entrar",
        form.msg.cget("text"))
 form.campos["email"].delete(0, "end")
-form.campos["email"].insert(0, "bruno@junior.com.br")
+form.campos["email"].insert(0, "bruno")
 form.campos["senha"].insert(0, "senha-bruno-1")
 form.enviar()
 checar(app.conexao is None and "aguarda a aprovacao" in form.msg.cget("text"),
        "conta pendente nao entra ate aprovar", form.msg.cget("text"))
 form.campos["senha"].insert(0, "senha-teste-123")
 form.campos["email"].delete(0, "end")
-form.campos["email"].insert(0, "tulio@junior.com.br")
+form.campos["email"].insert(0, "tulio")
 form.enviar()
 app.update()
 checar(tela.bt_pedidos.cget("text") == "Pedidos de acesso (1)", "admin ve 1 pedido aguardando",
