@@ -212,6 +212,19 @@ class Conexao:
     def criar_cidade(self, nome, uf=""):
         return self.pedir("POST", "/api/cidades", {"nome": nome, "uf": uf})
 
+    def renomear_cidade(self, cidade_id, nome, uf=""):
+        return self.pedir("POST", "/api/cidades/%s/renomear" % cidade_id, {"nome": nome, "uf": uf})
+
+    def excluir_cidade(self, cidade_id):
+        return self.pedir("DELETE", "/api/cidades/%s" % cidade_id)
+
+    def renomear_diagrama(self, cidade_id, diagrama_id, nome):
+        return self.pedir("POST", "/api/cidades/%s/diagramas/%s/renomear" % (cidade_id, diagrama_id),
+                          {"nome": nome})
+
+    def excluir_diagrama(self, cidade_id, diagrama_id):
+        return self.pedir("DELETE", "/api/cidades/%s/diagramas/%s" % (cidade_id, diagrama_id))
+
     def diagramas(self, cidade_id):
         return self.pedir("GET", "/api/cidades/%s/diagramas" % cidade_id)["diagramas"]
 

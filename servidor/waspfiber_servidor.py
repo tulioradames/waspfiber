@@ -34,6 +34,10 @@ API (JSON; depois do login: cabecalho  Authorization: Bearer <token>):
     POST /api/cidades/<c>/diagramas          {nome, conteudo}
     GET  /api/cidades/<c>/diagramas/<d>
     PUT  /api/cidades/<c>/diagramas/<d>      {conteudo, versao_base, forcar?}
+    POST /api/cidades/<c>/renomear           {nome, uf}
+    DELETE /api/cidades/<c>                  (admin; vai pra lixeira)
+    POST /api/cidades/<c>/diagramas/<d>/renomear   {nome}
+    DELETE /api/cidades/<c>/diagramas/<d>    (admin; vai pra lixeira)
 """
 
 import argparse
@@ -52,7 +56,7 @@ import unicodedata
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSAO_SERVIDOR = "B0.44"
+VERSAO_SERVIDOR = "B0.45"
 EXTENSAO = ".wasp.json"
 MAX_CORPO = 25 * 1024 * 1024
 DIAS_SESSAO = 30
@@ -357,18 +361,54 @@ class Armazem:
         if uf and uf not in UFS:
             raise ErroApi(400, "UF invalida.")
         titulo = "%s - %s" % (nome, uf) if uf else nome
-        cid = slug(titulo)
-        if not cid:
+        base = slug(titulo)
+        if not base:
             raise ErroApi(400, "Nome de cidade invalido.")
-        p = os.path.join(self._p_empresa(empresa_id), "cidades", cid)
         with self.trava:
-            if os.path.exists(os.path.join(p, "cidade.json")):
-                raise ErroApi(409, "Ja existe a cidade \"%s\"." % titulo)
+            self._titulo_livre(empresa_id, titulo)
+            cid, n = base, 2
+            while os.path.exists(os.path.join(self._p_empresa(empresa_id), "cidades", cid)):
+                cid, n = "%s-%d" % (base, n), n + 1
+            p = os.path.join(self._p_empresa(empresa_id), "cidades", cid)
             dados = {"nome": nome, "uf": uf, "titulo": titulo, "criada_por": por,
                      "criada_em": time.strftime("%Y-%m-%d %H:%M:%S")}
             _gravar_json(os.path.join(p, "cidade.json"), dados)
             os.makedirs(os.path.join(p, "diagramas"), exist_ok=True)
         return dict(dados, id=cid, diagramas=0)
+
+    def _titulo_livre(self, empresa_id, titulo, menos=None):
+        for c in self.listar_cidades(empresa_id):
+            if c["id"] != menos and slug(c.get("titulo", "")) == slug(titulo):
+                raise ErroApi(409, "Ja existe a cidade \"%s\"." % c.get("titulo", titulo))
+
+    def renomear_cidade(self, empresa_id, cidade_id, nome, uf, por):
+        """Troca nome e UF (o id - a pasta - continua o mesmo)."""
+        nome, uf = (nome or "").strip(), (uf or "").strip().upper()
+        if not nome:
+            raise ErroApi(400, "Informe o nome da cidade.")
+        if uf and uf not in UFS:
+            raise ErroApi(400, "UF invalida.")
+        titulo = "%s - %s" % (nome, uf) if uf else nome
+        p = self._p_cidade(empresa_id, cidade_id)
+        with self.trava:
+            self._titulo_livre(empresa_id, titulo, menos=cidade_id)
+            dados = _ler_json(os.path.join(p, "cidade.json"), {}) or {}
+            dados.update(nome=nome, uf=uf, titulo=titulo, renomeada_por=por,
+                         renomeada_em=time.strftime("%Y-%m-%d %H:%M:%S"))
+            _gravar_json(os.path.join(p, "cidade.json"), dados)
+        return dict(dados, id=cidade_id)
+
+    def excluir_cidade(self, empresa_id, cidade_id, por):
+        """Nao apaga: move a pasta inteira pra lixeira da empresa."""
+        p = self._p_cidade(empresa_id, cidade_id)
+        lixeira = os.path.join(self._p_empresa(empresa_id), "lixeira")
+        with self.trava:
+            dados = _ler_json(os.path.join(p, "cidade.json"), {}) or {}
+            dados.update(excluida_por=por, excluida_em=time.strftime("%Y-%m-%d %H:%M:%S"))
+            _gravar_json(os.path.join(p, "cidade.json"), dados)
+            os.makedirs(lixeira, exist_ok=True)
+            os.replace(p, os.path.join(lixeira, "%s-%s" % (cidade_id, time.strftime("%Y%m%d-%H%M%S"))))
+        return {"ok": True}
 
     # ---------------- diagramas ----------------
     def _p_diagrama(self, empresa_id, cidade_id, diagrama_id):
@@ -459,6 +499,35 @@ class Armazem:
                 did, n = "%s-%d" % (base, n), n + 1
             versao = self._gravar_diagrama(os.path.join(pasta, did + EXTENSAO), conteudo, por)
         return {"id": did, "versao": versao}
+
+    def renomear_diagrama(self, empresa_id, cidade_id, diagrama_id, nome, por):
+        """Troca o nome do local (o id do diagrama continua o mesmo)."""
+        nome = (nome or "").strip()
+        if not nome:
+            raise ErroApi(400, "Informe o nome.")
+        caminho = self._p_diagrama(empresa_id, cidade_id, diagrama_id)
+        with self.trava:
+            if not os.path.isfile(caminho):
+                raise ErroApi(404, "Diagrama nao encontrado.")
+            conteudo = json.loads(open(caminho, "rb").read().decode("utf-8"))
+            self._guardar_historico(caminho, self._p_cidade(empresa_id, cidade_id), diagrama_id)
+            local = conteudo.get("local") or {}
+            local["nome"] = nome
+            conteudo["local"] = local
+            versao = self._gravar_diagrama(caminho, conteudo, por)
+        return {"id": diagrama_id, "versao": versao, "titulo": nome}
+
+    def excluir_diagrama(self, empresa_id, cidade_id, diagrama_id, por):
+        """Nao apaga: move pra lixeira da cidade."""
+        caminho = self._p_diagrama(empresa_id, cidade_id, diagrama_id)
+        lixeira = os.path.join(self._p_cidade(empresa_id, cidade_id), "lixeira")
+        with self.trava:
+            if not os.path.isfile(caminho):
+                raise ErroApi(404, "Diagrama nao encontrado.")
+            os.makedirs(lixeira, exist_ok=True)
+            os.replace(caminho, os.path.join(lixeira, "%s-%s%s" % (
+                diagrama_id, time.strftime("%Y%m%d-%H%M%S"), EXTENSAO)))
+        return {"ok": True}
 
     def salvar_diagrama(self, empresa_id, cidade_id, diagrama_id, conteudo, versao_base,
                         por, forcar=False):
@@ -613,6 +682,26 @@ class Manipulador(BaseHTTPRequestHandler):
                 if metodo == "POST":
                     d = self._corpo()
                     return self._responder(201, a.criar_cidade(emp, d.get("nome"), d.get("uf"), por))
+            admin = s.get("papel") == "admin"
+            if len(rota) == 2 and rota[0] == "cidades" and metodo == "DELETE":
+                if not admin:
+                    raise ErroApi(403, "So o administrador da empresa exclui cidades.")
+                return self._responder(200, a.excluir_cidade(emp, rota[1], por))
+            if len(rota) == 3 and rota[0] == "cidades" and rota[2] == "renomear" \
+                    and metodo == "POST":
+                d = self._corpo()
+                return self._responder(200, a.renomear_cidade(emp, rota[1], d.get("nome"),
+                                                              d.get("uf"), por))
+            if len(rota) == 5 and rota[0] == "cidades" and rota[2] == "diagramas" \
+                    and rota[4] == "renomear" and metodo == "POST":
+                d = self._corpo()
+                return self._responder(200, a.renomear_diagrama(emp, rota[1], rota[3],
+                                                                d.get("nome"), por))
+            if len(rota) == 4 and rota[0] == "cidades" and rota[2] == "diagramas" \
+                    and metodo == "DELETE":
+                if not admin:
+                    raise ErroApi(403, "So o administrador da empresa exclui diagramas.")
+                return self._responder(200, a.excluir_diagrama(emp, rota[1], rota[3], por))
             if len(rota) == 3 and rota[0] == "cidades" and rota[2] == "diagramas":
                 if metodo == "GET":
                     return self._responder(200, {"diagramas": a.listar_diagramas(emp, rota[1])})
@@ -643,6 +732,9 @@ class Manipulador(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         self._tratar("PUT")
+
+    def do_DELETE(self):
+        self._tratar("DELETE")
 
 
 def criar_servidor(pasta_dados, endereco="0.0.0.0", porta=8765):

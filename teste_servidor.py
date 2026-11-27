@@ -174,6 +174,45 @@ e = erro_de(lambda: nuvem.Conexao.entrar_email("intruso@juniortelecom.com.br", "
 checar(e and e.status == 401 and adm.pedidos() == [], "recusado: conta apagada")
 c = nuvem.Conexao.entrar(url, "junior-telecom", "tulio@juniortelecom.com.br", "senha-forte-123")
 
+print("== renomear e excluir (B0.45) ==")
+cid2 = c.criar_cidade("Cubatao", "SP")
+ren = c.renomear_cidade(cid2["id"], "Bertioga", "SP")
+checar(ren["id"] == cid2["id"] and ren["titulo"] == "Bertioga - SP", "renomeia a cidade (mesmo id)", ren)
+e = erro_de(lambda: c.criar_cidade("Bertióga", "sp"))
+checar(e and e.status == 409, "mesmo nome sem acento conta como repetido")
+e = erro_de(lambda: c.renomear_cidade(cid2["id"], "Santos", "SP"))
+checar(e and e.status == 409, "renomear pra nome de outra cidade: 409")
+nova = c.criar_cidade("Cubatao", "SP")
+checar(nova["id"] == "cubatao-sp-2", "criar com o nome antigo funciona (pasta -2)", nova["id"])
+r_tmp = Rede()
+r_tmp.definir_local({"tipo": "CTO", "nome": "CTO Velha"})
+d_tmp = c.criar_diagrama(cid2["id"], "CTO Velha", r_tmp.to_dict())
+c.renomear_diagrama(cid2["id"], d_tmp["id"], "CTO Nova 01")
+lista_ren = c.diagramas(cid2["id"])
+checar(lista_ren[0]["id"] == d_tmp["id"] and lista_ren[0]["titulo"] == "CTO Nova 01",
+       "renomeia o diagrama (mesmo id, nome do local trocado)", lista_ren[0]["titulo"])
+checar(c.abrir(cid2["id"], d_tmp["id"])["conteudo"]["local"]["nome"] == "CTO Nova 01",
+       "o nome novo esta dentro do diagrama")
+comum_e = nuvem.Conexao.criar_conta("Comum", "comum@juniortelecom.com.br", "senha-comum-1", url)
+adm.decidir_pedido("comum@juniortelecom.com.br", True)
+comum = nuvem.Conexao.entrar_email("comum@juniortelecom.com.br", "senha-comum-1", url)
+e = erro_de(lambda: comum.excluir_diagrama(cid2["id"], d_tmp["id"]))
+checar(e and e.status == 403, "quem nao e admin nao exclui diagrama")
+e = erro_de(lambda: comum.excluir_cidade(cid2["id"]))
+checar(e and e.status == 403, "quem nao e admin nao exclui cidade")
+checar(comum.renomear_diagrama(cid2["id"], d_tmp["id"], "CTO Nova 02")["titulo"] == "CTO Nova 02",
+       "quem nao e admin renomeia")
+adm.excluir_diagrama(cid2["id"], d_tmp["id"])
+checar(c.diagramas(cid2["id"]) == [] and erro_de(lambda: c.abrir(cid2["id"], d_tmp["id"])).status == 404,
+       "diagrama excluido some")
+lix_d = os.path.join(dados, "empresas", "junior-telecom", "cidades", cid2["id"], "lixeira")
+checar(os.path.isdir(lix_d) and len(os.listdir(lix_d)) == 1, "diagrama vai pra lixeira (nao apaga)")
+adm.excluir_cidade(cid2["id"])
+checar(cid2["id"] not in [x["id"] for x in c.cidades()], "cidade excluida some da lista")
+lix_c = os.path.join(dados, "empresas", "junior-telecom", "lixeira")
+checar(os.path.isdir(lix_c) and any(n.startswith(cid2["id"]) for n in os.listdir(lix_c)),
+       "cidade vai pra lixeira (com os diagramas dela)")
+
 print("== bloqueio e backup (B0.40) ==")
 ws.BLOQUEIO_S = 2
 for _ in range(5):

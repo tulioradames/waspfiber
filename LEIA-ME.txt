@@ -1,4 +1,4 @@
-WASPFIBER - diagramas de fusao e fibra optica (FTTX)         versao B0.44
+WASPFIBER - diagramas de fusao e fibra optica (FTTX)         versao B0.45
 =========================================================================
 
 COMO ABRIR
@@ -6,6 +6,17 @@ COMO ABRIR
 Clique duas vezes em WaspFiber.exe. E isso - nao precisa instalar nada.
 Na primeira vez o Windows pode avisar "O Windows protegeu o computador":
 clique em "Mais informacoes" > "Executar assim mesmo".
+
+
+O QUE MUDOU NA B0.45 (editar e excluir)
+---------------------------------------
+- CIDADE: ao lado do nome da cidade ha um lapis (editar o nome e a UF) e
+  uma lixeira (excluir a cidade com os diagramas dela).
+- EQUIPAMENTOS (POP, CEO, CTO): cada cartao da lista tem o lapis
+  (renomear) e a lixeira (excluir).
+- EXCLUIR NAO APAGA DE VEZ: vai pra lixeira do servidor, de onde o
+  administrador do servidor consegue recuperar. Sempre pede confirmacao.
+- So o ADMINISTRADOR da empresa ve a lixeira; renomear e liberado pra todos.
 
 
 O QUE MUDOU NA B0.44 (mapa da cidade)

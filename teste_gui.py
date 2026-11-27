@@ -827,6 +827,40 @@ checar(tela.mapa_cidade.fonte != _f and tela.bt_fonte_mapa.cget("text") in ("Map
        "botao troca mapa / satelite")
 tela._trocar_fonte_mapa()
 checar(fttx.mapa.TIPOS_LOCAL[1] == ("CEO", "CEO"), "tipo 'CEO' (sem 'Caixa de emenda')")
+print("== editar e excluir (B0.45) ==")
+checar(tela.bt_editar_cidade.winfo_ismapped() and tela.bt_excluir_cidade.winfo_ismapped(),
+       "lapis e lixeira ao lado do nome da cidade (admin)")
+_l = tela.linhas_diagrama[_pop["id"]]
+checar([b.nome_icone for b in _l.botoes_acao] == ["pencil", "trash-2"],
+       "cada cartao tem lapis e lixeira (admin)")
+
+
+class _CidadeEditada:
+    def __init__(self, parent, cidade=None):
+        self.cidade = cidade
+        self.resultado = ("Santos Novo", "SP")
+
+
+_orig_dc = fttx.DialogNovaCidade
+fttx.DialogNovaCidade = _CidadeEditada
+tela.editar_cidade()
+fttx.DialogNovaCidade = _orig_dc
+app.update()
+checar(tela.lbl_cidade.cget("text") == "Santos Novo - SP" and tela.cidade["id"] == "santos-sp",
+       "editar o nome da cidade", tela.lbl_cidade.cget("text"))
+_orig_pt = fttx.perguntar_texto
+fttx.perguntar_texto = lambda *a, **k: "POP Central"
+tela.renomear_diagrama(next(i for i in tela.itens if i["id"] == _pop["id"]))
+fttx.perguntar_texto = _orig_pt
+app.update()
+checar(next(i for i in tela.itens if i["id"] == _pop["id"])["titulo"] == "POP Central",
+       "renomear o equipamento pelo lapis do cartao")
+_qtd = len(tela.itens)
+tela.excluir_diagrama(next(i for i in tela.itens if i["id"] == _ceo["id"]))
+app.update()
+checar(len(tela.itens) == _qtd - 1 and _ceo["id"] not in tela.linhas_diagrama,
+       "excluir o equipamento pela lixeira do cartao (com confirmacao)")
+
 print("== criar conta e pedidos de acesso (B0.41) ==")
 checar(tela.bt_pedidos.winfo_ismapped() and tela.bt_pedidos.cget("text") == "Pedidos de acesso",
        "administrador ve o botao de pedidos de acesso")
@@ -859,6 +893,18 @@ form.campos["senha"].insert(0, "senha-bruno-1")
 form.enviar()
 checar(app.conexao is None and "aguarda a aprovacao" in form.msg.cget("text"),
        "conta pendente nao entra ate aprovar", form.msg.cget("text"))
+_tmp_c = nuvem.Conexao.entrar_email("ana@junior.com.br", "senha-teste-456")
+checar(_tmp_c.info.get("papel") == "usuario", "(a Ana e usuaria comum)")
+_salva = app.conexao
+app.conexao = _tmp_c
+tela.escolher_cidade(_tmp_c.cidades()[0])
+app.update()
+_l2 = next(iter(tela.linhas_diagrama.values()))
+checar(tela.bt_excluir_cidade.winfo_manager() == "" and tela.bt_editar_cidade.winfo_manager() == "pack"
+       and [b.nome_icone for b in _l2.botoes_acao] == ["pencil"],
+       "usuaria comum: so o lapis (sem lixeira)")
+app.conexao = _salva
+tela.cidade = None
 form.campos["senha"].insert(0, "senha-teste-123")
 form.campos["email"].delete(0, "end")
 form.campos["email"].insert(0, "tulio")

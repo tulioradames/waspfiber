@@ -31,7 +31,7 @@ import waspfiber_mapa as mapa   # localizacao do diagrama (B0.34)
 import waspfiber_nuvem as nuvem   # servidor: login, cidades e diagramas (B0.39)
 
 APP_NOME = "WaspFiber"
-VERSAO = "B0.44"
+VERSAO = "B0.45"
 EXTENSAO = ".wasp.json"
 EXTENSAO_NIX = ".nix.json"      # redes salvas quando o programa se chamava Nix
 
@@ -4256,7 +4256,7 @@ class LinhaLista(tk.Frame):
 
     def __init__(self, pai, tema, icone, titulo, detalhe="", direita="", ao_clicar=None,
                  ao_duplo=None, fonte="TkDefaultFont", estilo="lista", selo=None,
-                 fonte_titulo=None, cor_icone=None):
+                 fonte_titulo=None, cor_icone=None, acoes=()):
         self.tema, self.estilo, self.selecionado = tema, estilo, False
         self.nome_icone, self.cor_icone = icone, cor_icone
         cartao = estilo == "cartao"
@@ -4288,6 +4288,16 @@ class LinhaLista(tk.Frame):
                                     fg=tema["ui_texto_fraco"], anchor="e", justify="right",
                                     font=(fonte, 8))
         self.lbl_direita.grid(row=0, column=3, rowspan=2, padx=(8, 14))
+        # acoes do cartao (B0.45): [(icone, dica, comando)] - lapis, lixeira...
+        self.quadro_acoes = tk.Frame(self, bg=self.cor_base)
+        self.botoes_acao = []
+        for icone_acao, dica, comando in acoes:
+            botao = nix_ui.BotaoIcone(self.quadro_acoes, tema, icone_acao, dica=dica,
+                                      comando=comando)
+            botao.pack(side="left")
+            self.botoes_acao.append(botao)
+        if acoes:
+            self.quadro_acoes.grid(row=0, column=4, rowspan=2, padx=(0, 6))
         self.columnconfigure(2, weight=1)
         self._fundos = (self, self.img, linha_titulo, self.lbl_titulo, self.lbl_detalhe,
                         self.lbl_direita)
@@ -4312,6 +4322,9 @@ class LinhaLista(tk.Frame):
         if self.selo is not None:
             self.selo.configure(bg=misturar(fundo, self.selo.cget("fg"), 0.16))
         self.barra.configure(bg=t["ui_acento"] if self.selecionado else fundo)
+        self.quadro_acoes.configure(bg=fundo)
+        for botao in self.botoes_acao:
+            botao._sair()
         if self.estilo == "cartao":
             self.configure(highlightbackground=t["ui_acento"] if self.selecionado
                            else (t["ui_texto_fraco"] if hover else t["ui_borda"]))
@@ -4396,16 +4409,19 @@ def marca_wordmark(pai, tema, fonte_titulo, fonte, tamanho_logo=48, subtitulo=Tr
 class DialogNovaCidade(DialogoBase):
     """Cadastra uma cidade no servidor da empresa."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, cidade=None):
+        self.cidade = cidade            # editando uma cidade existente (B0.45)
         self.resultado = None
-        super().__init__(parent, "Nova cidade")
+        super().__init__(parent, "Editar cidade" if cidade else "Nova cidade")
 
     def body(self, master):
         ttk.Label(master, text="Nome da cidade:").grid(row=0, column=0, sticky="w", pady=3)
         self.e_nome = ttk.Entry(master, width=34)
         self.e_nome.grid(row=0, column=1, sticky="we", pady=3)
+        if self.cidade:
+            self.e_nome.insert(0, self.cidade.get("nome", ""))
         ttk.Label(master, text="UF:").grid(row=1, column=0, sticky="w", pady=3)
-        self.var_uf = tk.StringVar(value="")
+        self.var_uf = tk.StringVar(value=(self.cidade or {}).get("uf", ""))
         ttk.Combobox(master, textvariable=self.var_uf, width=6, state="readonly",
                      values=("",) + nuvem.UFS).grid(row=1, column=1, sticky="w", pady=3)
         ttk.Label(master, text="A cidade fica no servidor da empresa: todo mundo da equipe "
@@ -4905,9 +4921,17 @@ class TelaInicio(tk.Frame):
         self.direita.pack(side="left", fill="both", expand=True)
         self.cab_cidade = tk.Frame(self.direita, bg=profundo)
         self.cab_cidade.pack(fill="x", padx=32, pady=(24, 4))
-        self.lbl_cidade = tk.Label(self.cab_cidade, text="", bg=profundo, fg=t["ui_texto"],
+        linha_nome = tk.Frame(self.cab_cidade, bg=profundo)
+        linha_nome.pack(anchor="w", fill="x")
+        self.lbl_cidade = tk.Label(linha_nome, text="", bg=profundo, fg=t["ui_texto"],
                                    font=(titulo, 20), anchor="w")
-        self.lbl_cidade.pack(anchor="w")
+        self.lbl_cidade.pack(side="left")
+        self.bt_editar_cidade = BotaoIcone(linha_nome, t, "pencil", dica="Editar o nome da cidade",
+                                           comando=self.editar_cidade)
+        self.bt_editar_cidade.pack(side="left", padx=(10, 0), pady=(6, 0))
+        self.bt_excluir_cidade = BotaoIcone(linha_nome, t, "trash-2", dica="Excluir a cidade",
+                                            comando=self.excluir_cidade)
+        self.bt_excluir_cidade.pack(side="left", pady=(6, 0))
         self.resumo = tk.Frame(self.cab_cidade, bg=profundo)
         self.resumo.pack(anchor="w", pady=(6, 0))
         self.barra_diagramas = tk.Frame(self.direita, bg=profundo)
@@ -5128,6 +5152,10 @@ class TelaInicio(tk.Frame):
             linha.marcar(chave == cidade["id"])
         self._esconder_aviso()
         self.lbl_cidade.configure(text=cidade["titulo"])
+        if self._admin():
+            self.bt_excluir_cidade.pack(side="left", pady=(6, 0))
+        else:
+            self.bt_excluir_cidade.pack_forget()
         self.listar_diagramas()
 
     def _montar_resumo(self, itens):
@@ -5202,11 +5230,75 @@ class TelaInicio(tk.Frame):
                                ao_duplo=lambda i=item: self.app.abrir_diagrama(self.cidade, i["id"]),
                                fonte=self.app.fonte_ui, fonte_titulo=self.app.fonte_titulo,
                                estilo="cartao", selo=selo,
-                               cor_icone=COR_ICONE_LOCAL.get(item["tipo"]))
+                               cor_icone=COR_ICONE_LOCAL.get(item["tipo"]),
+                               acoes=self._acoes_diagrama(item))
             linha.pack(fill="x", pady=4)
             self.linhas_diagrama[item["id"]] = linha
         self.lista_diagramas.ligar_roda()
         self._atualizar_mapa(itens)
+
+    # ---------------- editar / excluir (B0.45) ----------------
+    def _admin(self):
+        return bool(self.conexao and self.conexao.info.get("papel") == "admin")
+
+    def _acoes_diagrama(self, item):
+        acoes = [("pencil", "Renomear", lambda i=item: self.renomear_diagrama(i))]
+        if self._admin():
+            acoes.append(("trash-2", "Excluir", lambda i=item: self.excluir_diagrama(i)))
+        return acoes
+
+    def editar_cidade(self):
+        if not self.cidade:
+            return
+        dialogo = DialogNovaCidade(self.app, self.cidade)
+        if not dialogo.resultado:
+            return
+        nome, uf = dialogo.resultado
+        ok, cidade = self._chamar(lambda: self.conexao.renomear_cidade(self.cidade["id"], nome, uf),
+                                  "Editar cidade")
+        if ok:
+            self.cidade = cidade
+            self.atualizar()
+
+    def excluir_cidade(self):
+        if not self.cidade:
+            return
+        qtd = len(self.itens)
+        if not messagebox.askyesno(
+                "Excluir cidade",
+                "Excluir a cidade %s%s?\n\nEla sai da lista de todo mundo da empresa e vai pra "
+                "lixeira do servidor (da pra recuperar pelo administrador do servidor)."
+                % (self.cidade["titulo"], (" e os %d diagrama%s dela" % (qtd, "" if qtd == 1 else "s"))
+                   if qtd else "")):
+            return
+        ok, _ = self._chamar(lambda: self.conexao.excluir_cidade(self.cidade["id"]), "Excluir cidade")
+        if ok:
+            for item in self.itens:
+                nuvem.tirar_da_fila(self.cidade["id"], item["id"])
+            self.cidade = None
+            self.atualizar()
+
+    def renomear_diagrama(self, item):
+        nome = perguntar_texto("Renomear", "Novo nome do %s:" % (item["tipo"] or "diagrama"),
+                               self.app, initialvalue=item["titulo"])
+        if not nome or not nome.strip() or nome.strip() == item["titulo"]:
+            return
+        ok, _ = self._chamar(lambda: self.conexao.renomear_diagrama(self.cidade["id"], item["id"],
+                                                                     nome.strip()), "Renomear")
+        if ok:
+            self.listar_diagramas()
+
+    def excluir_diagrama(self, item):
+        if not messagebox.askyesno(
+                "Excluir", "Excluir o %s \"%s\"?\n\nEle vai pra lixeira do servidor (da pra "
+                           "recuperar pelo administrador do servidor)."
+                % (item["tipo"] or "diagrama", item["titulo"])):
+            return
+        ok, _ = self._chamar(lambda: self.conexao.excluir_diagrama(self.cidade["id"], item["id"]),
+                             "Excluir")
+        if ok:
+            nuvem.tirar_da_fila(self.cidade["id"], item["id"])
+            self.listar_diagramas()
 
     # ---------------- mapa da cidade (B0.44) ----------------
     def _atualizar_mapa(self, itens):
